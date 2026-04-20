@@ -21,6 +21,16 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private let actionDisplayResolver = ActionDisplayResolver()
     private let actionDisplayRenderer = ActionDisplayRenderer()
 
+    // MARK: - Conflict Indicator
+    private var conflictIconView: NSImageView?
+    private var conflictTrackingArea: NSTrackingArea?
+    private var conflictPopover: NSPopover?
+    private var currentTriggerCode: UInt16 = 0
+    private var conflictObserverTokens: [NSObjectProtocol] = []
+    private static let conflictIconSize: CGFloat = 14  // 图标绘制尺寸
+    private static let conflictHitSize: CGFloat = 28   // hover 热区尺寸 (外扩以便好点中)
+    private static let conflictIconGap: CGFloat = 6    // 图标两侧与虚线的间距
+
     // MARK: - Callbacks
     private var onShortcutSelected: ((SystemShortcut.Shortcut?) -> Void)?
     private var onDeleteRequested: (() -> Void)?
@@ -70,10 +80,20 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         // 配置动作选择器
         setupActionPopUpButton(currentShortcut: binding.systemShortcut, showLogiActions: isLogiTrigger)
 
-        // 绘制虚线分隔符(延迟到下一个 runloop,等 AutoLayout 完成布局)
+        // 记录当前 trigger code 以供冲突检测
+        self.currentTriggerCode = isLogiTrigger ? binding.triggerEvent.code : 0
+
+        // 绘制虚线分隔符和冲突指示器(延迟到下一个 runloop,等 AutoLayout 完成布局)
         DispatchQueue.main.async {
-            self.setupDashedLine()
+            self.refreshConflictIndicator()
         }
+
+        // 订阅 Logitech session / reporting 通知, 保证设备状态变化时自动刷新
+        registerConflictObservers()
+    }
+
+    deinit {
+        unregisterConflictObservers()
     }
 
     // 高亮该行（重复两次）
@@ -119,6 +139,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     ///
     /// 在 keyPreview 和 actionPopUpButton 之间绘制垂直居中的虚线
     /// 虚线使用淡灰色,兼容 macOS 10.13+
+    /// 若存在冲突指示图标, 在图标左右两侧留 gap, 避免压线.
     private func setupDashedLine() {
         // 清理旧的虚线层(Cell复用时)
         dashedLineLayer?.removeFromSuperlayer()
@@ -149,8 +170,21 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
 
         // 创建虚线路径
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: startX, y: centerY))
-        path.addLine(to: CGPoint(x: endX, y: centerY))
+
+        if let iconFrame = conflictIconView?.frame {
+            // 图标存在, 在图标实际绘制尺寸两侧留 gap (iconView.frame 是 hit area, 比图标本身大)
+            let midX = iconFrame.midX
+            let gap = Self.conflictIconGap
+            let iconLeft = midX - Self.conflictIconSize / 2 - gap
+            let iconRight = midX + Self.conflictIconSize / 2 + gap
+            path.move(to: CGPoint(x: startX, y: centerY))
+            path.addLine(to: CGPoint(x: iconLeft, y: centerY))
+            path.move(to: CGPoint(x: iconRight, y: centerY))
+            path.addLine(to: CGPoint(x: endX, y: centerY))
+        } else {
+            path.move(to: CGPoint(x: startX, y: centerY))
+            path.addLine(to: CGPoint(x: endX, y: centerY))
+        }
 
         // 创建 CAShapeLayer 绘制虚线
         let shapeLayer = CAShapeLayer()
@@ -164,6 +198,190 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
 
         // 保存引用,便于下次清理
         dashedLineLayer = shapeLayer
+    }
+
+    // MARK: - Conflict Indicator
+
+    /// 按当前 trigger code 的 Logi 冲突状态, 显示/隐藏中段的 branch 图标, 并重绘虚线.
+    private func refreshConflictIndicator() {
+        // 清理旧的图标和 popover
+        hideConflictPopover()
+        if let view = conflictIconView {
+            if let area = conflictTrackingArea {
+                view.removeTrackingArea(area)
+            }
+            view.removeFromSuperview()
+        }
+        conflictIconView = nil
+        conflictTrackingArea = nil
+
+        // 非 Logi 按键 -> 不显示
+        guard currentTriggerCode > 0, LogitechCIDRegistry.isLogitechCode(currentTriggerCode) else {
+            setupDashedLine()
+            return
+        }
+
+        let status = LogitechHIDManager.shared.conflictStatus(forMosCode: currentTriggerCode)
+        guard status == .conflict else {
+            setupDashedLine()
+            return
+        }
+
+        drawConflictIcon()
+        setupDashedLine()
+    }
+
+    private func drawConflictIcon() {
+        guard let keyBox = keyDisplayContainerView.superview,
+              let contentView = keyBox.superview else { return }
+        guard let iconImage = conflictIconImage() else { return }
+
+        let keyFrame = keyDisplayContainerView.convert(keyPreview.frame, to: contentView)
+        let buttonFrame = actionPopUpButton.frame
+        let horizontalMargin: CGFloat = 8.0
+        let startX = keyFrame.maxX + horizontalMargin
+        let endX = buttonFrame.minX - horizontalMargin
+        let hitSize = Self.conflictHitSize
+        let iconSize = Self.conflictIconSize
+        let centerX = (startX + endX) / 2
+        let centerY = contentView.bounds.height / 2
+
+        // NSImageView 的 frame 作为 hover 热区, 图标通过 imageAlignment 居中显示为 iconSize 大小
+        let imageView = NSImageView(frame: NSRect(
+            x: centerX - hitSize / 2,
+            y: centerY - hitSize / 2,
+            width: hitSize,
+            height: hitSize
+        ))
+        imageView.image = iconImage
+        imageView.imageAlignment = .alignCenter
+        imageView.imageScaling = .scaleNone
+        if #available(macOS 11.0, *) {
+            imageView.contentTintColor = NSColor.systemOrange
+        }
+        imageView.setAccessibilityLabel(NSLocalizedString("button_conflict_title", comment: ""))
+
+        contentView.addSubview(imageView)
+        conflictIconView = imageView
+
+        let area = NSTrackingArea(
+            rect: imageView.bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        imageView.addTrackingArea(area)
+        conflictTrackingArea = area
+    }
+
+    /// macOS 11+ 用 SF Symbol `arrow.triangle.branch` (橘色 tint, 14pt);
+    /// 10.13~10.15 fallback 到系统 NSCaution (黄三角+感叹号, 内置色彩, 缩放到 14pt).
+    private func conflictIconImage() -> NSImage? {
+        let size = Self.conflictIconSize
+        if #available(macOS 11.0, *) {
+            let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+            return NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)?
+                .withSymbolConfiguration(config)
+        }
+        guard let caution = NSImage(named: NSImage.cautionName) else { return nil }
+        let scaled = NSImage(size: NSSize(width: size, height: size))
+        scaled.lockFocus()
+        caution.draw(in: NSRect(origin: .zero, size: NSSize(width: size, height: size)))
+        scaled.unlockFocus()
+        return scaled
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard conflictIconView != nil else {
+            super.mouseEntered(with: event)
+            return
+        }
+        showConflictPopover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard conflictIconView != nil else {
+            super.mouseExited(with: event)
+            return
+        }
+        hideConflictPopover()
+    }
+
+    private func showConflictPopover() {
+        guard let anchor = conflictIconView, conflictPopover == nil else { return }
+
+        let popover = NSPopover()
+        popover.behavior = .applicationDefined
+        popover.animates = true
+
+        let vc = NSViewController()
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: NSLocalizedString("button_conflict_title", comment: ""))
+        titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(titleLabel)
+
+        let detailLabel = NSTextField(wrappingLabelWithString: NSLocalizedString("button_conflict_detail", comment: ""))
+        detailLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        detailLabel.textColor = NSColor.secondaryLabelColor
+        detailLabel.preferredMaxLayoutWidth = 280
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(detailLabel)
+
+        let padding: CGFloat = 12
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 300),
+
+            titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: padding),
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: padding),
+            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -padding),
+
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+            detailLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: padding),
+            detailLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -padding),
+            detailLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding),
+        ])
+
+        vc.view = container
+        popover.contentViewController = vc
+
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        conflictPopover = popover
+    }
+
+    private func hideConflictPopover() {
+        conflictPopover?.close()
+        conflictPopover = nil
+    }
+
+    private func registerConflictObservers() {
+        unregisterConflictObservers()
+        let center = NotificationCenter.default
+        let sessionToken = center.addObserver(
+            forName: LogitechHIDManager.sessionChangedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshConflictIndicator()
+        }
+        let reportingToken = center.addObserver(
+            forName: LogitechHIDManager.reportingQueryDidCompleteNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshConflictIndicator()
+        }
+        conflictObserverTokens = [sessionToken, reportingToken]
+    }
+
+    private func unregisterConflictObservers() {
+        let center = NotificationCenter.default
+        for token in conflictObserverTokens {
+            center.removeObserver(token)
+        }
+        conflictObserverTokens.removeAll()
     }
 
     /// 设置动作选择器 PopUpButton
@@ -253,9 +471,9 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         // 通知外部更新(nil 表示清除绑定)
         onShortcutSelected?(shortcut)
 
-        // 延迟重绘虚线 (等待 PopUpButton 布局更新)
+        // 延迟重绘虚线和冲突指示器 (等待 PopUpButton 布局更新)
         DispatchQueue.main.async {
-            self.setupDashedLine()
+            self.refreshConflictIndicator()
         }
     }
 
@@ -358,7 +576,7 @@ extension ButtonTableCellView: KeyRecorderDelegate {
         guard !didRecord else { return }
         DispatchQueue.main.async {
             self.refreshActionDisplay()
-            self.setupDashedLine()
+            self.refreshConflictIndicator()
         }
     }
 
@@ -376,9 +594,9 @@ extension ButtonTableCellView: KeyRecorderDelegate {
             self.currentCustomName = customName
             self.refreshActionDisplay()
             self.onCustomShortcutRecorded?(customName)
-            // 重绘虚线
+            // 重绘虚线和冲突指示器
             DispatchQueue.main.async {
-                self.setupDashedLine()
+                self.refreshConflictIndicator()
             }
         }
     }

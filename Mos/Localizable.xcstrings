@@ -9904,6 +9904,100 @@
           }
         }
       }
+    },
+    "button_conflict_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button may be managed by another app"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このボタンは他のアプリが管理している可能性があります"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 버튼은 다른 앱이 관리할 수 있습니다"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按键可能被其他应用接管"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵可能被其他應用程式接管"
+          }
+        },
+        "zh-Hant-HK" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵可能被其他應用程式接管"
+          }
+        },
+        "zh-Hant-TW" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵可能被其他應用程式接管"
+          }
+        }
+      }
+    },
+    "button_conflict_detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This button appears to be managed by another app (e.g. Logitech Options+). When both apps capture the same button, behavior may be unpredictable. Release it in the other app, or quit that app, to let Mos handle it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このボタンは他のアプリ (Logitech Options+ など) に管理されているようです。両方のアプリが同じボタンを捕捉すると、動作が不安定になる場合があります。他のアプリでこのボタンを解放するか、そのアプリを終了すると、Mos が処理できるようになります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 버튼은 다른 앱(예: Logitech Options+)이 관리하는 것으로 보입니다. 두 앱이 같은 버튼을 캡처하면 예기치 않은 동작이 발생할 수 있습니다. 다른 앱에서 이 버튼을 해제하거나 해당 앱을 종료하면 Mos가 처리할 수 있습니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按键似乎正被其他应用 (例如 Logitech Options+) 接管。两个应用同时捕获同一按键可能导致行为异常。请在对应应用中释放该按键,或退出该应用,以便由 Mos 处理。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。"
+          }
+        },
+        "zh-Hant-HK" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。"
+          }
+        },
+        "zh-Hant-TW" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

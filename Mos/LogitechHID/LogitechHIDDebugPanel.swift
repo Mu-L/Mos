@@ -220,7 +220,7 @@ class LogitechHIDDebugPanel: NSObject {
 
     private class DeviceNode {
         let session: LogitechDeviceSession
-        var isReceiver: Bool { session.debugConnectionMode == "receiver" }
+        var isReceiver: Bool { session.connectionMode == .receiver }
         init(session: LogitechDeviceSession) { self.session = session }
     }
 
@@ -1163,7 +1163,7 @@ class LogitechHIDDebugPanel: NSObject {
     private func refreshSidebar() {
         let sessions = LogitechHIDManager.shared.activeSessions
         deviceNodes = sessions
-            .filter { $0.debugConnectionMode != "unsupported" }
+            .filter { $0.connectionMode != .unsupported }
             .map { DeviceNode(session: $0) }
         outlineView?.reloadData()
         for node in deviceNodes where node.isReceiver { outlineView?.expandItem(node) }
@@ -1428,13 +1428,49 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
 
         if let node = item as? DeviceNode {
             let prefix = node.isReceiver ? "[R]" : "[M]"
-            let attr = NSMutableAttributedString(string: "\(prefix) \(node.session.deviceInfo.name) ",
-                                                  attributes: [.foregroundColor: NSColor.labelColor,
-                                                               .font: NSFont.systemFont(ofSize: 11)])
-            let dot = NSAttributedString(string: "\u{25CF}",
-                                          attributes: [.foregroundColor: NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0),
-                                                       .font: NSFont.systemFont(ofSize: 8)])
-            attr.append(dot)
+            let session = node.session
+
+            // 根据 usagePage/usage 推出接口角色 (区分同 receiver 下的多个 HID 接口)
+            let role: String
+            switch (session.usagePage, session.usage) {
+            case (0x0001, 0x0002): role = "mouse"
+            case (0x0001, 0x0006): role = "kbd"
+            case (0x0001, 0x0001): role = "pointer"
+            case (0x0001, 0x0080): role = "sys"
+            case (0x000C, _):      role = "consumer"
+            case (0xFF00, _), (0xFF43, _), (0xFFC0, _): role = "vendor"
+            default: role = String(format: "%04X/%02X", session.usagePage, session.usage)
+            }
+
+            let nameFont = NSFont.systemFont(ofSize: 11)
+            let badgeFont = NSFont.systemFont(ofSize: 10)
+            let badgeFontBold = NSFont.systemFont(ofSize: 10, weight: .medium)
+
+            let attr = NSMutableAttributedString(
+                string: "\(prefix) \(session.deviceInfo.name)",
+                attributes: [.foregroundColor: NSColor.labelColor, .font: nameFont]
+            )
+            attr.append(NSAttributedString(
+                string: "  \(role)",
+                attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: badgeFont]
+            ))
+            if session.isHIDPPCandidate {
+                attr.append(NSAttributedString(
+                    string: " · ",
+                    attributes: [.foregroundColor: NSColor.quaternaryLabelColor, .font: badgeFont]
+                ))
+                attr.append(NSAttributedString(
+                    string: "HID++",
+                    attributes: [.foregroundColor: NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.9),
+                                 .font: badgeFontBold]
+                ))
+            }
+            attr.append(NSAttributedString(string: " "))
+            attr.append(NSAttributedString(
+                string: "\u{25CF}",
+                attributes: [.foregroundColor: NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0),
+                             .font: NSFont.systemFont(ofSize: 8)]
+            ))
             label.attributedStringValue = attr
         } else if let slot = item as? SlotNode {
             let paired = slot.session.debugReceiverPairedDevices
@@ -1530,8 +1566,14 @@ extension LogitechHIDDebugPanel: NSTableViewDelegate {
         guard let label = cell.textField else { return cell }
         label.textColor = .labelColor
 
-        let isDiverted = ctrl.reportingFlags & 0x01 != 0
-        let isRemapped = ctrl.targetCID != 0
+        // 方案 B: reportingFlags 永远反映设备响应的真值 (Mos 不污染),
+        // 所以 reportingFlags 非零 = 第三方 (Options+ 等) 的 tmpDivert / persistDivert;
+        // targetCID != 0 = 第三方 remap (Mos 从不 remap);
+        // Mos 自己的 divert 视角通过 divertedCIDs 集合单独表达.
+        let isForeignDivert = ctrl.reportingFlags != 0
+        // self-remap (targetCID == cid) 是 Logitech 默认的 identity mapping, 不算 remap
+        let isRemapped = ctrl.targetCID != 0 && ctrl.targetCID != ctrl.cid
+        let isMosDivert = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
 
         switch tableColumn?.identifier.rawValue {
         case "cCid": label.stringValue = String(format: "0x%04X", ctrl.cid)
@@ -1540,12 +1582,18 @@ extension LogitechHIDDebugPanel: NSTableViewDelegate {
             label.stringValue = HIDPPInfo.flagsDescription(ctrl.flags)
             label.textColor = .secondaryLabelColor
         case "cStatus":
-            if isDiverted {
-                label.stringValue = "DVRT"
-                label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
+            if isForeignDivert {
+                // 第三方 tmpDivert / persistDivert -> 冲突信号, 红色
+                label.stringValue = "3rd-DVRT"
+                label.textColor = NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.3, alpha: 0.9)
             } else if isRemapped {
+                // 第三方 remap -> 黄色
                 label.stringValue = "REMAP"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.8, blue: 0.2, alpha: 0.8)
+            } else if isMosDivert {
+                // Mos 自己 divert -> 橘色
+                label.stringValue = "DVRT"
+                label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
             } else {
                 label.stringValue = "\u{25CF}"
                 label.textColor = NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0)

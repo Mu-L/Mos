@@ -57,6 +57,11 @@ class LogitechDeviceSession {
     private static let discoveryTimeout: TimeInterval = 5.0
     private var pendingCacheValidation: UInt8? = nil  // 等待 ping 响应验证缓存
 
+    // MARK: - Query Timeouts (防止 Bolt receiver 上 HID++ 响应丢包 / 错误导致 query 链路卡死)
+    private var controlInfoQueryTimer: Timer?
+    private var reportingQueryTimer: Timer?
+    private static let reprogQueryTimeout: TimeInterval = 1.0
+
     // MARK: - Reprog Controls State
     private var reprogControlCount: Int = 0
     private var reprogQueryIndex: Int = 0
@@ -179,6 +184,11 @@ class LogitechDeviceSession {
     var debugFeatureIndex: [UInt16: UInt8] { featureIndex }
     var debugDiscoveredControls: [ControlInfo] { discoveredControls }
     var debugDivertedCIDs: Set<UInt16> { divertedCIDs }
+
+    /// 查询指定 CID 的 ControlInfo (供冲突判定等外部查询使用).
+    func control(forCID cid: UInt16) -> ControlInfo? {
+        return discoveredControls.first(where: { $0.cid == cid })
+    }
     var debugReprogInitComplete: Bool { reprogInitComplete }
     var debugDeviceIndex: UInt8 { deviceIndex }
     var debugIsBLE: Bool { isBLE }
@@ -264,6 +274,10 @@ class LogitechDeviceSession {
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Teardown")
         discoveryTimer?.invalidate()
         discoveryTimer = nil
+        controlInfoQueryTimer?.invalidate()
+        controlInfoQueryTimer = nil
+        reportingQueryTimer?.invalidate()
+        reportingQueryTimer = nil
         pendingDiscovery.removeAll()
         if let reprogIdx = featureIndex[Self.featureReprogV4] {
             for cid in divertedCIDs {
@@ -380,6 +394,29 @@ class LogitechDeviceSession {
     private func sendGetControlInfo(featureIndex: UInt8, index: Int) {
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Sending GetControlInfo(\(index))")
         sendRequest(featureIndex: featureIndex, functionId: 1, params: [UInt8(index)])
+        scheduleControlInfoTimeout(index: index)
+    }
+
+    private func scheduleControlInfoTimeout(index: Int) {
+        controlInfoQueryTimer?.invalidate()
+        controlInfoQueryTimer = Timer.scheduledTimer(withTimeInterval: Self.reprogQueryTimeout, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            LogitechHIDDebugPanel.log("[\(self.deviceInfo.name)] GetControlInfo[\(index)] timed out, skipping")
+            self.advanceControlInfoQuery()
+        }
+    }
+
+    /// 推进 controlInfo 查询 (正常响应 / 错误 / 超时 都调此方法)
+    private func advanceControlInfoQuery() {
+        controlInfoQueryTimer?.invalidate()
+        controlInfoQueryTimer = nil
+        reprogQueryIndex += 1
+        if reprogQueryIndex < reprogControlCount, let idx = featureIndex[Self.featureReprogV4] {
+            sendGetControlInfo(featureIndex: idx, index: reprogQueryIndex)
+        } else {
+            // ControlInfo 全部获取完毕, 开始逐个查询 reporting 状态
+            startReportingQuery()
+        }
     }
 
     private func setControlReporting(featureIndex: UInt8, cid: UInt16, divert: Bool) {
@@ -398,14 +435,9 @@ class LogitechDeviceSession {
         sendRequest(featureIndex: featureIndex, functionId: 3,
                          params: [cidH, cidL, flagsByte, 0x00, 0x00])
         if divert { divertedCIDs.insert(cid) } else { divertedCIDs.remove(cid) }
-        // 同步更新 ControlInfo 的 reporting 状态 (只更新 tmpDivert bit)
-        if let idx = discoveredControls.firstIndex(where: { $0.cid == cid }) {
-            if divert {
-                discoveredControls[idx].reportingFlags |= 0x01
-            } else {
-                discoveredControls[idx].reportingFlags &= ~0x01
-            }
-        }
+        // 方案 B: 不再本地改写 reportingFlags.
+        // reportingFlags 永远反映 "GetControlReporting 响应的真值" (设备层状态, Mos 接管前).
+        // Mos 自己的 divert 视角由 divertedCIDs 集合唯一表达, 避免污染冲突判定的依据.
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] CID \(String(format: "0x%04X", cid)) divert=\(divert ? "ON" : "OFF")")
     }
 
@@ -1126,11 +1158,31 @@ class LogitechDeviceSession {
 
         // HID++ 2.0 Error report
         if featureIdx == Self.hidppErrorFeatureIdx {
+            let originalFeatureIdx = report.count > 3 ? report[3] : 0
+            let originalFuncId: UInt8 = report.count > 4 ? (report[4] >> 4) : 0
             let errorCode = report.count > 6 ? report[6] : 0
-            LogitechHIDDebugPanel.log("[\(deviceInfo.name)] HID++ Error: feat=\(String(format: "0x%02X", report[3])) err=\(String(format: "0x%02X", errorCode))")
+            LogitechHIDDebugPanel.log("[\(deviceInfo.name)] HID++ Error: feat=\(String(format: "0x%02X", originalFeatureIdx)) func=\(originalFuncId) err=\(String(format: "0x%02X", errorCode))")
+
+            // Feature discovery pending callbacks
             for (featureId, callback) in pendingDiscovery {
                 callback(nil)
                 pendingDiscovery.removeValue(forKey: featureId)
+            }
+
+            // REPROG_V4 query 错误: 跳过该 CID 继续下一个, 防止 Bolt receiver 上 query 链路卡死
+            if let reprogIdx = featureIndex[Self.featureReprogV4],
+               originalFeatureIdx == reprogIdx,
+               !reprogInitComplete {
+                switch originalFuncId {
+                case 1:  // GetControlInfo
+                    LogitechHIDDebugPanel.log("[\(deviceInfo.name)] GetControlInfo[\(reprogQueryIndex)] returned error, skipping")
+                    advanceControlInfoQuery()
+                case 2:  // GetControlReporting
+                    LogitechHIDDebugPanel.log("[\(deviceInfo.name)] GetControlReporting[\(reportingQueryIndex)] returned error, skipping")
+                    advanceReportingQuery()
+                default:
+                    break
+                }
             }
             return
         }
@@ -1356,13 +1408,7 @@ class LogitechDeviceSession {
         discoveredControls.append(ControlInfo(cid: cid, taskId: taskId, flags: flags, isDivertable: isDivertable))
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Control[\(reprogQueryIndex)]: CID=\(String(format: "0x%04X", cid)) flags=\(String(format: "0x%04X", flags)) divertable=\(isDivertable)")
 
-        reprogQueryIndex += 1
-        if reprogQueryIndex < reprogControlCount, let idx = featureIndex[Self.featureReprogV4] {
-            sendGetControlInfo(featureIndex: idx, index: reprogQueryIndex)
-        } else {
-            // ControlInfo 全部获取完毕, 开始逐个查询 reporting 状态
-            startReportingQuery()
-        }
+        advanceControlInfoQuery()
     }
 
     // MARK: - GetControlReporting Query (function 2)
@@ -1384,6 +1430,30 @@ class LogitechDeviceSession {
         // GetControlReporting: function 2, params: CID(2)
         sendRequest(featureIndex: featureIndex, functionId: 2,
                     params: [UInt8(cid >> 8), UInt8(cid & 0xFF)])
+        scheduleReportingTimeout(index: controlIndex)
+    }
+
+    private func scheduleReportingTimeout(index: Int) {
+        reportingQueryTimer?.invalidate()
+        reportingQueryTimer = Timer.scheduledTimer(withTimeInterval: Self.reprogQueryTimeout, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            LogitechHIDDebugPanel.log("[\(self.deviceInfo.name)] GetControlReporting[\(index)] timed out, skipping")
+            self.advanceReportingQuery()
+        }
+    }
+
+    /// 推进 reporting 查询 (正常响应 / 错误 / 超时 都调此方法)
+    private func advanceReportingQuery() {
+        reportingQueryTimer?.invalidate()
+        reportingQueryTimer = nil
+        reportingQueryIndex += 1
+        if reportingQueryIndex < discoveredControls.count, let reprogIdx = featureIndex[Self.featureReprogV4] {
+            sendGetControlReporting(featureIndex: reprogIdx, controlIndex: reportingQueryIndex)
+        } else {
+            LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Reporting query complete")
+            NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
+            divertBoundControls()
+        }
     }
 
     private func handleGetControlReportingResponse(_ report: [UInt8]) {
@@ -1412,14 +1482,8 @@ class LogitechDeviceSession {
             : ""
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Reporting[\(cidName)]: flags=\(flagStr)\(targetStr)")
 
-        // 继续查询下一个
-        reportingQueryIndex += 1
-        if reportingQueryIndex < discoveredControls.count, let reprogIdx = featureIndex[Self.featureReprogV4] {
-            sendGetControlReporting(featureIndex: reprogIdx, controlIndex: reportingQueryIndex)
-        } else {
-            LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Reporting query complete")
-            divertBoundControls()
-        }
+        // 继续查询下一个 (或完成)
+        advanceReportingQuery()
     }
 
     /// 初始化完成后: 按 binding 状态 divert 对应按键.

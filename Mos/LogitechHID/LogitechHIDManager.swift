@@ -133,6 +133,26 @@ class LogitechHIDManager {
 
     static let sessionChangedNotification = NSNotification.Name("LogitechHIDSessionChanged")
 
+    /// 某个 session 完成 reporting 查询后触发, UI 可据此刷新冲突指示.
+    static let reportingQueryDidCompleteNotification = NSNotification.Name("LogitechHIDReportingQueryDidComplete")
+
+    /// 查询某 Logi MosCode 当前是否被第三方 (如 Logitech Options+) 接管.
+    /// 未连接设备 / 未完成 reporting 查询 / 非 Logi code -> unknown.
+    func conflictStatus(forMosCode mosCode: UInt16) -> LogitechConflictDetector.Status {
+        guard let cid = LogitechCIDRegistry.toCID(mosCode) else { return .unknown }
+        for session in sessions.values where session.isHIDPPCandidate {
+            if let control = session.control(forCID: cid) {
+                return LogitechConflictDetector.status(
+                    reportingFlags: control.reportingFlags,
+                    targetCID: control.targetCID,
+                    cid: cid,
+                    reportingQueried: control.reportingQueried
+                )
+            }
+        }
+        return .unknown
+    }
+
     // MARK: - Divert Control
 
     /// 绑定变更后调用: 同步所有会话的 divert 状态
