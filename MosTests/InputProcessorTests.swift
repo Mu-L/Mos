@@ -436,7 +436,31 @@ final class InputProcessorTests: XCTestCase {
         XCTAssertEqual(MouseInteractionSessionController.shared.activeSessionCount, 0)
     }
 
-    func testButtonCore_passthroughMouseEvent_appliesVirtualModifierFlags() {
+    func testButtonCore_passthroughKeyboardEvent_appliesVirtualModifierFlags() {
+        let modifierTrigger = RecordedEvent(type: .mouse, code: 6, modifiers: 0, displayComponents: ["🖱7"], deviceFilter: nil)
+        let modifierBinding = ButtonBinding(triggerEvent: modifierTrigger, systemShortcutName: "custom::56:0", isEnabled: true)
+        Options.shared.buttons.binding = [modifierBinding]
+        ButtonUtils.shared.invalidateCache()
+
+        let modifierDown = InputEvent(type: .mouse, code: 6, modifiers: .init(rawValue: 0),
+                                      phase: .down, source: .hidPP, device: nil)
+        XCTAssertEqual(InputProcessor.shared.process(modifierDown), .consumed)
+        XCTAssertEqual(InputProcessor.shared.activeModifierFlags, CGEventFlags.maskShift.rawValue)
+
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: 0,
+            keyDown: true
+        )!
+
+        let proxy = CGEventTapProxy(bitPattern: 1)!
+        let output = ButtonCore.shared.buttonEventCallBack(proxy, .keyDown, event, nil)
+
+        XCTAssertNotNil(output)
+        XCTAssertTrue(event.flags.contains(.maskShift))
+    }
+
+    func testButtonCore_passthroughRealLeftMouseEvent_doesNotApplyVirtualModifierFlags() {
         let modifierTrigger = RecordedEvent(type: .mouse, code: 6, modifiers: 0, displayComponents: ["🖱7"], deviceFilter: nil)
         let modifierBinding = ButtonBinding(triggerEvent: modifierTrigger, systemShortcutName: "custom::56:0", isEnabled: true)
         Options.shared.buttons.binding = [modifierBinding]
@@ -455,10 +479,10 @@ final class InputProcessorTests: XCTestCase {
         )!
 
         let proxy = CGEventTapProxy(bitPattern: 1)!
-        let output = ButtonCore.shared.buttonEventCallBack(proxy, .leftMouseDown, event, nil)
+        let output = ButtonCore.shared.primaryMouseObservationCallBack(proxy, .leftMouseDown, event, nil)
 
         XCTAssertNotNil(output)
-        XCTAssertTrue(event.flags.contains(.maskShift))
+        XCTAssertFalse(event.flags.contains(.maskShift))
     }
 
     func testCGEventExtensions_otherMouseDraggedIsRecognizedForDiagnostics() {
@@ -608,19 +632,39 @@ final class InputProcessorTests: XCTestCase {
         )
     }
 
-    func testButtonCoreEventMask_includesFullMouseDownAndUpCoverage() {
+    func testButtonCore_dispatchEventMask_excludesPrimaryMouseButtons() {
         let core = ButtonCore.shared
 
-        func contains(_ type: CGEventType) -> Bool {
+        func contains(_ type: CGEventType, in mask: CGEventMask) -> Bool {
             let typeMask = CGEventMask(1 << type.rawValue)
-            return core.eventMask & typeMask != 0
+            return mask & typeMask != 0
         }
 
-        XCTAssertTrue(contains(.leftMouseDown))
-        XCTAssertTrue(contains(.leftMouseUp))
-        XCTAssertTrue(contains(.rightMouseDown))
-        XCTAssertTrue(contains(.rightMouseUp))
-        XCTAssertTrue(contains(.otherMouseDown))
-        XCTAssertTrue(contains(.otherMouseUp))
+        XCTAssertFalse(contains(.leftMouseDown, in: core.dispatchEventMask))
+        XCTAssertFalse(contains(.leftMouseUp, in: core.dispatchEventMask))
+        XCTAssertFalse(contains(.rightMouseDown, in: core.dispatchEventMask))
+        XCTAssertFalse(contains(.rightMouseUp, in: core.dispatchEventMask))
+        XCTAssertTrue(contains(.otherMouseDown, in: core.dispatchEventMask))
+        XCTAssertTrue(contains(.otherMouseUp, in: core.dispatchEventMask))
+        XCTAssertTrue(contains(.keyDown, in: core.dispatchEventMask))
+        XCTAssertTrue(contains(.keyUp, in: core.dispatchEventMask))
+    }
+
+    func testButtonCore_primaryObservationMask_includesPrimaryMouseButtons() {
+        let core = ButtonCore.shared
+
+        func contains(_ type: CGEventType, in mask: CGEventMask) -> Bool {
+            let typeMask = CGEventMask(1 << type.rawValue)
+            return mask & typeMask != 0
+        }
+
+        XCTAssertTrue(contains(.leftMouseDown, in: core.primaryObservationEventMask))
+        XCTAssertTrue(contains(.leftMouseUp, in: core.primaryObservationEventMask))
+        XCTAssertTrue(contains(.rightMouseDown, in: core.primaryObservationEventMask))
+        XCTAssertTrue(contains(.rightMouseUp, in: core.primaryObservationEventMask))
+        XCTAssertFalse(contains(.otherMouseDown, in: core.primaryObservationEventMask))
+        XCTAssertFalse(contains(.otherMouseUp, in: core.primaryObservationEventMask))
+        XCTAssertFalse(contains(.keyDown, in: core.primaryObservationEventMask))
+        XCTAssertFalse(contains(.keyUp, in: core.primaryObservationEventMask))
     }
 }
