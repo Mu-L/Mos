@@ -20,3 +20,4 @@ build/*.zip
 /build
 /spec
 .superpowers/
+/.claude/worktrees
