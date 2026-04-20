@@ -1422,30 +1422,41 @@ class LogitechDeviceSession {
         }
     }
 
-    /// 初始化完成后: 清理 persistDivert 残留, 然后按 binding 重新 divert
+    /// 初始化完成后: 按 binding 状态 divert 对应按键.
+    /// 不再扫全部 divertable 控件 - 避免覆盖 Logitech Options+ 等第三方进程的 divert 设置.
+    /// 跨启动残留: 本进程 Set 为空, 仅能处理当前 bound CID; 曾绑定但已解绑的残留依赖设备断电/重连自然清除 (tmpDivert 固件态).
     private func divertBoundControls() {
-        guard let idx = featureIndex[Self.featureReprogV4] else { return }
-
-        // 先 undivert 所有 divertable 控件 (清理 app 崩溃/强杀后的 persistDivert 残留)
-        let divertable = discoveredControls.filter { $0.isDivertable }
-        for c in divertable {
-            setControlReporting(featureIndex: idx, cid: c.cid, divert: false)
-        }
-        divertedCIDs.removeAll()
-        LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Cleared persistDivert residue (\(divertable.count) controls)")
-
-        // 再按 binding 状态重新 divert
         reprogInitComplete = true
         lastActiveCIDs.removeAll()
         syncDivertWithBindings()
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")
     }
 
-    /// 同步 divert 状态: 只 divert 有绑定的按键, un-divert 没有绑定的
+    /// 同步 divert 状态: 只触碰 "已绑定的按键" 与 "本进程曾 divert 但已不再绑定的按键",
+    /// 其它 CID (包括 Options+ 可能 divert 的) 一律不碰.
     func syncDivertWithBindings() {
         guard let idx = featureIndex[Self.featureReprogV4] else { return }
 
-        // 收集所有需要 divert 的 Logi 鼠标按键码
+        let boundCodes = collectBoundLogiMosCodes()
+        let divertableCIDs = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
+        let plan = LogitechDivertPlanner.plan(
+            boundMosCodes: boundCodes,
+            alreadyDiverted: divertedCIDs,
+            divertableCIDs: divertableCIDs
+        )
+
+        for cid in plan.toDivert {
+            setControlReporting(featureIndex: idx, cid: cid, divert: true)
+        }
+        for cid in plan.toUndivert {
+            setControlReporting(featureIndex: idx, cid: cid, divert: false)
+        }
+
+        LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Sync divert: +\(plan.toDivert.count) -\(plan.toUndivert.count), now \(divertedCIDs.count) diverted (bound=\(boundCodes.count))")
+    }
+
+    /// 汇总当前所有可能触发 Logi 按键的 MosCode (按键面板 + 滚动面板 + 分应用)
+    private func collectBoundLogiMosCodes() -> Set<UInt16> {
         var boundCodes = Set<UInt16>()
 
         // 1. 按键面板: 全局按钮绑定
@@ -1471,25 +1482,7 @@ class LogitechDeviceSession {
             }
         }
 
-        let divertable = discoveredControls.filter { $0.isDivertable }
-        var divertCount = 0
-
-        for c in divertable {
-            let mosCode = LogitechCIDRegistry.toMosCode(c.cid)
-            let shouldDivert = boundCodes.contains(mosCode)
-            let currentlyDiverted = divertedCIDs.contains(c.cid)
-
-            if shouldDivert && !currentlyDiverted {
-                setControlReporting(featureIndex: idx, cid: c.cid, divert: true)
-                divertCount += 1
-            } else if !shouldDivert && currentlyDiverted {
-                setControlReporting(featureIndex: idx, cid: c.cid, divert: false)
-            } else if shouldDivert {
-                divertCount += 1
-            }
-        }
-
-        LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Sync divert: \(divertCount)/\(divertable.count) controls diverted (based on bindings)")
+        return boundCodes
     }
 
     /// 录制模式: 临时 divert 所有 divertable 按键
