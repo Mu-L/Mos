@@ -218,6 +218,7 @@ class LogitechHIDDebugPanel: NSObject {
     private var logObserver: NSObjectProtocol?
     private var sessionObserver: NSObjectProtocol?
     private var reportingCompleteObserver: NSObjectProtocol?
+    private var windowCloseObserver: NSObjectProtocol?
 
     // MARK: - Sidebar Data
 
@@ -325,6 +326,10 @@ class LogitechHIDDebugPanel: NSObject {
 
         let topInset = resolvedTopInset(for: panel)
         buildContent(in: effectView, topInset: topInset)
+
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: .main
+        ) { [weak self] _ in self?.stopObserving() }
 
         return panel
     }
@@ -1234,10 +1239,14 @@ class LogitechHIDDebugPanel: NSObject {
             selectedControlCID = nil
         }
         if let outlineView = outlineView {
-            if let selectedItem = selectedItem, let row = row(for: selectedItem, in: outlineView) {
+            if let prev = selectedItem, let row = row(for: prev, in: outlineView) {
                 outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            } else if let currentSession = currentSession,
-                      let row = row(for: .device(sessionID: ObjectIdentifier(currentSession)), in: outlineView) {
+            } else if case .device? = selectedItem,
+                      let session = currentSession,
+                      let row = row(for: .device(sessionID: ObjectIdentifier(session)), in: outlineView) {
+                // Device-row fallback only. If the previous selection was a slot that
+                // disappeared, deselect rather than silently jumping to the device row —
+                // that would strip target-slot context without the user noticing.
                 outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             } else {
                 outlineView.deselectAll(nil)
