@@ -201,6 +201,7 @@ class LogitechHIDDebugPanel: NSObject {
     private var paramInputField: NSTextField?
     private var indexParamValue: Int = 0
     private var indexStepperLabel: NSTextField?
+    private weak var featuresControlsSplit: NSSplitView?
 
     // MARK: - Log
 
@@ -349,6 +350,38 @@ class LogitechHIDDebugPanel: NSObject {
         override var dividerThickness: CGFloat { return 8 }
         override func drawDivider(in rect: NSRect) {
             // Draw nothing — gap between rounded-corner sections is the visual divider
+        }
+    }
+
+    // Horizontal NSSplitView (isVertical = true → children arranged left/right).
+    // Invisible divider to match the rounded-section aesthetic; the gap itself is the visual cue.
+    private final class HorizontalSplitView: NSSplitView {
+        override var dividerThickness: CGFloat { return 8 }
+        override func drawDivider(in rect: NSRect) { /* no-op */ }
+    }
+
+    // Table header cell that skips the default gradient chrome and renders only its attributed text.
+    private final class DarkHeaderCell: NSTableHeaderCell {
+        override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+            drawInterior(withFrame: cellFrame, in: controlView)
+        }
+    }
+
+    // Table header view with transparent bg + subtle bottom divider.
+    private final class DarkHeaderView: NSTableHeaderView {
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.clear.setFill()
+            dirtyRect.fill()
+            let border = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+            NSColor(calibratedWhite: 1.0, alpha: 0.08).setFill()
+            border.fill()
+            if let table = tableView {
+                for i in 0..<table.numberOfColumns {
+                    let cellRect = headerRect(ofColumn: i)
+                    guard dirtyRect.intersects(cellRect) else { continue }
+                    table.tableColumns[i].headerCell.draw(withFrame: cellRect, in: self)
+                }
+            }
         }
     }
 
@@ -507,41 +540,49 @@ class LogitechHIDDebugPanel: NSObject {
     // MARK: - Build Top Area (Auto Layout)
 
     private func buildTopArea(in parent: NSView) {
-        let fCol = NSView()
-        let cCol = NSView()
         let aCol = NSView()
-        for v in [fCol, cCol, aCol] { v.translatesAutoresizingMaskIntoConstraints = false; parent.addSubview(v) }
+        aCol.translatesAutoresizingMaskIntoConstraints = false
+        parent.addSubview(aCol)
+
+        let fcSplit = HorizontalSplitView()
+        fcSplit.isVertical = true
+        fcSplit.dividerStyle = .thin
+        fcSplit.autosaveName = "HIDDebug.FeaturesControls"
+        fcSplit.delegate = self
+        fcSplit.translatesAutoresizingMaskIntoConstraints = false
+        parent.addSubview(fcSplit)
+        self.featuresControlsSplit = fcSplit
 
         NSLayoutConstraint.activate([
-            // Feature column: left, top, bottom
-            fCol.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
-            fCol.topAnchor.constraint(equalTo: parent.topAnchor),
-            fCol.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
-            // Controls column: after features, same top/bottom, same width
-            cCol.leadingAnchor.constraint(equalTo: fCol.trailingAnchor, constant: L.gap),
-            cCol.topAnchor.constraint(equalTo: parent.topAnchor),
-            cCol.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
-            cCol.widthAnchor.constraint(equalTo: fCol.widthAnchor),
-            // Actions column: after controls, right edge, fixed width
-            aCol.leadingAnchor.constraint(equalTo: cCol.trailingAnchor, constant: L.gap),
+            fcSplit.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+            fcSplit.topAnchor.constraint(equalTo: parent.topAnchor),
+            fcSplit.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
+            fcSplit.trailingAnchor.constraint(equalTo: aCol.leadingAnchor, constant: -L.gap),
+
             aCol.topAnchor.constraint(equalTo: parent.topAnchor),
             aCol.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
             aCol.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
             aCol.widthAnchor.constraint(equalToConstant: L.actionsWidth),
         ])
 
+        let fCol = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 280))
+        let cCol = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 280))
+        fcSplit.addSubview(fCol)
+        fcSplit.addSubview(cCol)
+
         buildTableColumn(in: fCol, headerTag: 100, headerText: "FEATURES (0)", tableTag: 200,
-                          columns: [("fIdx", 36), ("fId", 50), ("fName", 0)],
+                          columns: [("fIdx", "Idx", 36), ("fId", "ID", 50), ("fName", "Name", 0)],
                           action: #selector(featureTableClicked(_:)), isFeature: true)
         buildTableColumn(in: cCol, headerTag: 101, headerText: "CONTROLS (0)", tableTag: 201,
-                          columns: [("cCid", 50), ("cName", 0), ("cFlags", 40), ("cStatus", 50)],
+                          columns: [("cCid", "CID", 50), ("cName", "Name", 0), ("cFlags", "Flags", 84), ("cStatus", "Status", 64)],
                           action: #selector(controlsTableClicked(_:)), isFeature: false)
         buildActionsPanel(in: aCol)
     }
 
-    /// Build a table column section: bg + header + scrollView with table
+    /// Build a table column section: bg + section header + dark column headers + scrollView/table
     private func buildTableColumn(in parent: NSView, headerTag: Int, headerText: String,
-                                   tableTag: Int, columns: [(String, CGFloat)],
+                                   tableTag: Int,
+                                   columns: [(id: String, title: String, width: CGFloat)],
                                    action: Selector, isFeature: Bool) {
         let bg = makeSectionBg()
         bg.translatesAutoresizingMaskIntoConstraints = false
@@ -576,7 +617,7 @@ class LogitechHIDDebugPanel: NSObject {
 
         let table = NSTableView()
         table.backgroundColor = .clear
-        table.headerView = nil
+        table.headerView = DarkHeaderView()
         table.selectionHighlightStyle = .regular
         table.rowHeight = 20
         table.tag = tableTag
@@ -586,8 +627,15 @@ class LogitechHIDDebugPanel: NSObject {
         table.action = action
         table.columnAutoresizingStyle = isFeature ? .lastColumnOnlyAutoresizingStyle : .uniformColumnAutoresizingStyle
 
-        for (id, w) in columns {
+        let headerAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+        ]
+        for (id, title, w) in columns {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+            let headerCell = DarkHeaderCell(textCell: title)
+            headerCell.attributedStringValue = NSAttributedString(string: title, attributes: headerAttrs)
+            c.headerCell = headerCell
             if w > 0 { c.width = w; c.resizingMask = isFeature ? [] : [] }
             else { c.width = 100; c.resizingMask = .autoresizingMask }
             table.addTableColumn(c)
@@ -1629,6 +1677,18 @@ extension LogitechHIDDebugPanel: NSTableViewDataSource {
         case 300: return filteredLogEntries().count
         default: return 0
         }
+    }
+}
+
+extension LogitechHIDDebugPanel: NSSplitViewDelegate {
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Features column min width
+        return 180
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Controls column min width — leave at least 200pt on the right
+        return max(180, splitView.bounds.width - 200)
     }
 }
 
