@@ -501,7 +501,6 @@ class LogitechDeviceSession {
         lastActiveCIDs.removeAll()
         pendingCacheValidation = nil
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Target slot changed to \(slot)")
-        NotificationCenter.default.post(name: LogitechHIDManager.sessionChangedNotification, object: nil)
     }
 
     // MARK: - Receiver Device Enumeration
