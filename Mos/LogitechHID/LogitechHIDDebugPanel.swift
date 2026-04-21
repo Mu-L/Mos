@@ -1446,8 +1446,9 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
             let badgeFont = NSFont.systemFont(ofSize: 10)
             let badgeFontBold = NSFont.systemFont(ofSize: 10, weight: .medium)
 
+            let primaryText = node.isReceiver ? prefix : "\(prefix) \(session.deviceInfo.name)"
             let attr = NSMutableAttributedString(
-                string: "\(prefix) \(session.deviceInfo.name)",
+                string: primaryText,
                 attributes: [.foregroundColor: NSColor.labelColor, .font: nameFont]
             )
             attr.append(NSAttributedString(
