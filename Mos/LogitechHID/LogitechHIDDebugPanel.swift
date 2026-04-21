@@ -199,7 +199,7 @@ class LogitechHIDDebugPanel: NSObject {
 
     private var contextActionsContainer: NSView!
     private var paramInputField: NSTextField?
-    private var indexStepper: NSStepper?
+    private var indexParamValue: Int = 0
     private var indexStepperLabel: NSTextField?
 
     // MARK: - Log
@@ -893,33 +893,38 @@ class LogitechHIDDebugPanel: NSObject {
                 by += L.btnH + L.btnGap
             }
             by += 4
-            let pf = NSTextField()
-            pf.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-            pf.placeholderString = "params (hex)"
-            pf.frame = NSRect(x: L.pad, y: by, width: w, height: 22)
-            pf.wantsLayer = true
-            pf.layer?.cornerRadius = 3
-            pf.textColor = .labelColor
-            pf.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.08)
-            pf.isBezeled = false
+            let pf = makeInputField(placeholder: "params (hex)")
+            pf.frame = NSRect(x: L.pad, y: by, width: w, height: L.btnH)
             container.addSubview(pf)
             self.paramInputField = pf
-            by += 26
+            by += L.btnH + L.btnGap
 
-            let sl = makeLabel(text: "Index: 0", fontSize: 10, color: .secondaryLabelColor)
-            sl.frame = NSRect(x: L.pad, y: by, width: 60, height: 18)
-            container.addSubview(sl)
+            // Reset index on each feature switch (matches prior behavior — stepper used to
+            // be re-created at 0 every rebuild).
+            indexParamValue = 0
+
+            let stepW: CGFloat = 22
+            let stepGap: CGFloat = 2
+            let indexRow = FlippedView(frame: NSRect(x: L.pad, y: by, width: w, height: L.btnH))
+            let labelW = w - (stepW * 2 + stepGap)
+
+            let sl = makeLabel(text: "Index: 0", fontSize: 11, color: .secondaryLabelColor)
+            sl.alignment = .left
+            sl.frame = NSRect(x: 0, y: 0, width: labelW, height: L.btnH)
+            sl.cell?.lineBreakMode = .byTruncatingTail
+            indexRow.addSubview(sl)
             self.indexStepperLabel = sl
 
-            let stepper = NSStepper()
-            stepper.minValue = 0
-            stepper.maxValue = 255
-            stepper.integerValue = 0
-            stepper.target = self
-            stepper.action = #selector(indexStepperChanged(_:))
-            stepper.frame = NSRect(x: L.pad + 62, y: by, width: 19, height: 18)
-            container.addSubview(stepper)
-            self.indexStepper = stepper
+            let minusBtn = makeStepBtn(title: "−", action: #selector(indexMinusClicked))
+            minusBtn.frame = NSRect(x: labelW, y: 1, width: stepW, height: stepW)
+            indexRow.addSubview(minusBtn)
+
+            let plusBtn = makeStepBtn(title: "+", action: #selector(indexPlusClicked))
+            plusBtn.frame = NSRect(x: labelW + stepW + stepGap, y: 1, width: stepW, height: stepW)
+            indexRow.addSubview(plusBtn)
+
+            container.addSubview(indexRow)
+            by += L.btnH + L.btnGap
 
         } else if let cid = selectedControlCID {
             let isDiverted = currentSession?.debugDivertedCIDs.contains(cid) ?? false
@@ -962,8 +967,17 @@ class LogitechHIDDebugPanel: NSObject {
         }
     }
 
-    @objc private func indexStepperChanged(_ sender: NSStepper) {
-        indexStepperLabel?.stringValue = "Index: \(sender.integerValue)"
+    @objc private func indexMinusClicked() {
+        setIndexParamValue(max(0, indexParamValue - 1))
+    }
+
+    @objc private func indexPlusClicked() {
+        setIndexParamValue(min(255, indexParamValue + 1))
+    }
+
+    private func setIndexParamValue(_ v: Int) {
+        indexParamValue = v
+        indexStepperLabel?.stringValue = "Index: \(v)"
     }
 
     // MARK: - Global Actions
@@ -1014,7 +1028,7 @@ class LogitechHIDDebugPanel: NSObject {
             switch action.paramType {
             case .none: break
             case .index:
-                params[0] = UInt8(indexStepper?.integerValue ?? 0)
+                params[0] = UInt8(indexParamValue)
             case .hex:
                 if let hexStr = paramInputField?.stringValue, !hexStr.isEmpty {
                     let bytes = hexStr.split(separator: " ").compactMap { UInt8($0, radix: 16) }
@@ -1421,6 +1435,35 @@ class LogitechHIDDebugPanel: NSObject {
         btn.layer?.borderWidth = 1
         btn.layer?.cornerRadius = 4
         btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        if #available(macOS 10.14, *) { btn.contentTintColor = .labelColor }
+        return btn
+    }
+
+    private func makeInputField(placeholder: String) -> NSTextField {
+        let tf = NSTextField()
+        tf.placeholderString = placeholder
+        tf.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        tf.textColor = .labelColor
+        tf.backgroundColor = NSColor(calibratedWhite: 0.0, alpha: 0.18)
+        tf.isBezeled = false
+        tf.drawsBackground = true
+        tf.focusRingType = .none
+        tf.wantsLayer = true
+        tf.layer?.cornerRadius = 4
+        tf.layer?.borderColor = NSColor(calibratedWhite: 1.0, alpha: 0.18).cgColor
+        tf.layer?.borderWidth = 1
+        return tf
+    }
+
+    private func makeStepBtn(title: String, action: Selector) -> NSButton {
+        let btn = NSButton(title: title, target: self, action: action)
+        btn.isBordered = false
+        btn.wantsLayer = true
+        btn.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.06).cgColor
+        btn.layer?.borderColor = NSColor(calibratedWhite: 1.0, alpha: 0.18).cgColor
+        btn.layer?.borderWidth = 1
+        btn.layer?.cornerRadius = 4
+        btn.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         if #available(macOS 10.14, *) { btn.contentTintColor = .labelColor }
         return btn
     }
