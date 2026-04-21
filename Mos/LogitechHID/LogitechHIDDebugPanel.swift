@@ -547,7 +547,7 @@ class LogitechHIDDebugPanel: NSObject {
         let fcSplit = HorizontalSplitView()
         fcSplit.isVertical = true
         fcSplit.dividerStyle = .thin
-        fcSplit.autosaveName = "HIDDebug.FeaturesControls"
+        fcSplit.autosaveName = "HIDDebug.FeaturesControls.v2"
         fcSplit.delegate = self
         fcSplit.translatesAutoresizingMaskIntoConstraints = false
         parent.addSubview(fcSplit)
@@ -565,8 +565,12 @@ class LogitechHIDDebugPanel: NSObject {
             aCol.widthAnchor.constraint(equalToConstant: L.actionsWidth),
         ])
 
-        let fCol = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 280))
-        let cCol = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 280))
+        // Default split ratio ~36:64 (Features:Controls). Features only has 3 narrow
+        // columns (Idx/ID/Name) so a smaller default leaves room for Controls' 4 columns
+        // to show worst-case strings ("Mouse,Reprog,Divert,RawXY", "3rd-DVRT") without
+        // truncation. autosaveName preserves any user-chosen position over this default.
+        let fCol = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 280))
+        let cCol = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 280))
         fcSplit.addSubview(fCol)
         fcSplit.addSubview(cCol)
 
@@ -574,8 +578,8 @@ class LogitechHIDDebugPanel: NSObject {
                           columns: [("fIdx", "Idx", 36, false), ("fId", "ID", 50, false), ("fName", "Name", 160, true)],
                           action: #selector(featureTableClicked(_:)), isFeature: true)
         buildTableColumn(in: cCol, headerTag: 101, headerText: "CONTROLS (0)", tableTag: 201,
-                          columns: [("cCid", "CID", 50, false), ("cName", "Name", 140, true),
-                                    ("cFlags", "Flags", 110, true), ("cStatus", "Status", 64, true)],
+                          columns: [("cCid", "CID", 50, false), ("cName", "Name", 150, true),
+                                    ("cFlags", "Flags", 170, true), ("cStatus", "Status", 78, true)],
                           action: #selector(controlsTableClicked(_:)), isFeature: false)
         buildActionsPanel(in: aCol)
     }
