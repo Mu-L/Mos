@@ -171,6 +171,8 @@ class LogitechHIDDebugPanel: NSObject {
         static let pad: CGFloat = 8
         static let btnH: CGFloat = 24
         static let btnGap: CGFloat = 4
+        // Min height for Actions panel context area. Fits worst-known feature (ReprogControlsV4: 4 action buttons + params field + index stepper ≈ 168pt) with slack.
+        static let ctxMinH: CGFloat = 180
         static let topRatio: CGFloat = 0.4
         static let devInfoH: CGFloat = 140
         static let logToolbarH: CGFloat = 28
@@ -644,6 +646,7 @@ class LogitechHIDDebugPanel: NSObject {
             ctxC.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
             ctxC.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
             ctxC.bottomAnchor.constraint(equalTo: sep.topAnchor),
+            ctxC.heightAnchor.constraint(greaterThanOrEqualToConstant: L.ctxMinH),
 
             sep.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: L.pad),
             sep.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -L.pad),
