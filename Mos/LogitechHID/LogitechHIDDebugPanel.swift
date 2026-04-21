@@ -215,6 +215,7 @@ class LogitechHIDDebugPanel: NSObject {
     static let maxLogLines = 500
     private var logObserver: NSObjectProtocol?
     private var sessionObserver: NSObjectProtocol?
+    private var reportingCompleteObserver: NSObjectProtocol?
 
     // MARK: - Sidebar Data
 
@@ -228,6 +229,11 @@ class LogitechHIDDebugPanel: NSObject {
         let session: LogitechDeviceSession
         let slot: UInt8
         init(session: LogitechDeviceSession, slot: UInt8) { self.session = session; self.slot = slot }
+    }
+
+    private enum SidebarSelection {
+        case device(sessionID: ObjectIdentifier)
+        case slot(sessionID: ObjectIdentifier, slot: UInt8)
     }
 
     private var deviceNodes: [DeviceNode] = []
@@ -1160,13 +1166,59 @@ class LogitechHIDDebugPanel: NSObject {
         updateContextActions()
     }
 
+    private func currentSidebarSelection() -> SidebarSelection? {
+        guard let outlineView = outlineView else { return nil }
+        let row = outlineView.selectedRow
+        guard row >= 0 else { return nil }
+        if let node = outlineView.item(atRow: row) as? DeviceNode {
+            return .device(sessionID: ObjectIdentifier(node.session))
+        }
+        if let node = outlineView.item(atRow: row) as? SlotNode {
+            return .slot(sessionID: ObjectIdentifier(node.session), slot: node.slot)
+        }
+        return nil
+    }
+
+    private func row(for selection: SidebarSelection, in outlineView: NSOutlineView) -> Int? {
+        for row in 0..<outlineView.numberOfRows {
+            if let node = outlineView.item(atRow: row) as? DeviceNode {
+                if case let .device(sessionID) = selection, ObjectIdentifier(node.session) == sessionID {
+                    return row
+                }
+                continue
+            }
+            if let node = outlineView.item(atRow: row) as? SlotNode,
+               case let .slot(sessionID, slot) = selection,
+               ObjectIdentifier(node.session) == sessionID,
+               node.slot == slot {
+                return row
+            }
+        }
+        return nil
+    }
+
     private func refreshSidebar() {
         let sessions = LogitechHIDManager.shared.activeSessions
+        let previousSessionIDs = Set(deviceNodes.map { ObjectIdentifier($0.session) })
+        let expandedSessionIDs: Set<ObjectIdentifier>
+        let selectedItem = currentSidebarSelection()
+        if let outlineView = outlineView {
+            expandedSessionIDs = Set(deviceNodes.compactMap { node in
+                outlineView.isItemExpanded(node) ? ObjectIdentifier(node.session) : nil
+            })
+        } else {
+            expandedSessionIDs = []
+        }
         deviceNodes = sessions
             .filter { $0.connectionMode != .unsupported }
             .map { DeviceNode(session: $0) }
         outlineView?.reloadData()
-        for node in deviceNodes where node.isReceiver { outlineView?.expandItem(node) }
+        for node in deviceNodes where node.isReceiver {
+            let sessionID = ObjectIdentifier(node.session)
+            if expandedSessionIDs.contains(sessionID) || !previousSessionIDs.contains(sessionID) {
+                outlineView?.expandItem(node)
+            }
+        }
         // If current session disconnected, select first remaining device and clear selection state
         if let cs = currentSession, !sessions.contains(where: { $0 === cs }) {
             currentSession = deviceNodes.first?.session
@@ -1177,6 +1229,16 @@ class LogitechHIDDebugPanel: NSObject {
             currentSession = deviceNodes.first?.session
             selectedFeatureId = nil
             selectedControlCID = nil
+        }
+        if let outlineView = outlineView {
+            if let selectedItem = selectedItem, let row = row(for: selectedItem, in: outlineView) {
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            } else if let currentSession = currentSession,
+                      let row = row(for: .device(sessionID: ObjectIdentifier(currentSession)), in: outlineView) {
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            } else {
+                outlineView.deselectAll(nil)
+            }
         }
     }
 
@@ -1273,11 +1335,19 @@ class LogitechHIDDebugPanel: NSObject {
         sessionObserver = NotificationCenter.default.addObserver(
             forName: LogitechHIDManager.sessionChangedNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.refreshAll() }
+        reportingCompleteObserver = NotificationCenter.default.addObserver(
+            forName: LogitechHIDManager.reportingQueryDidCompleteNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.refreshRightPanels() }
     }
 
     private func stopObserving() {
         if let o = logObserver { NotificationCenter.default.removeObserver(o); logObserver = nil }
         if let o = sessionObserver { NotificationCenter.default.removeObserver(o); sessionObserver = nil }
+        if let o = reportingCompleteObserver {
+            NotificationCenter.default.removeObserver(o)
+            reportingCompleteObserver = nil
+        }
         // Layout observers (frame change) are not tracked here — they're tied to the views
         // and auto-removed when the views are deallocated.
     }
