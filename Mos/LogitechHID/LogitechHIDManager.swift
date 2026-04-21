@@ -136,6 +136,28 @@ class LogitechHIDManager {
     /// 某个 session 完成 reporting 查询后触发, UI 可据此刷新冲突指示.
     static let reportingQueryDidCompleteNotification = NSNotification.Name("LogitechHIDReportingQueryDidComplete")
 
+    // MARK: - Reporting Refresh Throttle
+
+    /// 最小刷新间隔:避免 UI 事件频繁触发导致 HID++ 协议压力.
+    /// 用户的预期场景 (打开面板 / 切分页 / App 激活) 在 30s 内几乎不会产生新的冲突变化,
+    /// 取 30s 是响应性 vs HID link 稳定性的折中.
+    private static let reportingRefreshMinInterval: TimeInterval = 30
+
+    private var lastReportingRefresh: Date?
+
+    /// Coalesced 入口:刷新所有 HID++ session 的 reporting 状态 (重跑 GetControlReporting).
+    /// UI 触发点可随意调用,manager 内部按 `reportingRefreshMinInterval` 防抖.
+    /// 同步返回,不阻塞 UI — 实际 HID++ 请求在各自 session 的 input-report 回调里异步处理,
+    /// 完成后通过 `reportingQueryDidCompleteNotification` 刷新 indicator.
+    func refreshReportingStatesIfNeeded() {
+        if let last = lastReportingRefresh,
+           Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
+        lastReportingRefresh = Date()
+        for session in sessions.values where session.isHIDPPCandidate {
+            session.refreshReportingState()
+        }
+    }
+
     /// 查询某 Logi MosCode 当前是否被第三方 (如 Logitech Options+) 接管.
     /// 未连接设备 / 未完成 reporting 查询 / 非 Logi code -> unknown.
     func conflictStatus(forMosCode mosCode: UInt16) -> LogitechConflictDetector.Status {

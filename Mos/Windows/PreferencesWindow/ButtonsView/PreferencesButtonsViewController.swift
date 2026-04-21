@@ -42,6 +42,8 @@ class PreferencesButtonsViewController: NSViewController {
         toggleNoDataHint()
         // 设置录制按钮回调
         setupRecordButtonCallback()
+        // 触发一次冲突状态刷新 (30s 内最多跑一次,异步)
+        LogitechHIDManager.shared.refreshReportingStatesIfNeeded()
     }
 
     // 添加
