@@ -414,7 +414,7 @@ class LogitechHIDDebugPanel: NSObject {
         let outline = NSOutlineView()
         outline.headerView = nil
         outline.backgroundColor = .clear
-        outline.selectionHighlightStyle = .sourceList
+        outline.selectionHighlightStyle = .regular
         outline.indentationPerLevel = 14
         outline.rowHeight = 22
         let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("device"))
