@@ -571,10 +571,11 @@ class LogitechHIDDebugPanel: NSObject {
         fcSplit.addSubview(cCol)
 
         buildTableColumn(in: fCol, headerTag: 100, headerText: "FEATURES (0)", tableTag: 200,
-                          columns: [("fIdx", "Idx", 36), ("fId", "ID", 50), ("fName", "Name", 0)],
+                          columns: [("fIdx", "Idx", 36, false), ("fId", "ID", 50, false), ("fName", "Name", 160, true)],
                           action: #selector(featureTableClicked(_:)), isFeature: true)
         buildTableColumn(in: cCol, headerTag: 101, headerText: "CONTROLS (0)", tableTag: 201,
-                          columns: [("cCid", "CID", 50), ("cName", "Name", 0), ("cFlags", "Flags", 84), ("cStatus", "Status", 64)],
+                          columns: [("cCid", "CID", 50, false), ("cName", "Name", 140, true),
+                                    ("cFlags", "Flags", 110, true), ("cStatus", "Status", 64, true)],
                           action: #selector(controlsTableClicked(_:)), isFeature: false)
         buildActionsPanel(in: aCol)
     }
@@ -582,7 +583,7 @@ class LogitechHIDDebugPanel: NSObject {
     /// Build a table column section: bg + section header + dark column headers + scrollView/table
     private func buildTableColumn(in parent: NSView, headerTag: Int, headerText: String,
                                    tableTag: Int,
-                                   columns: [(id: String, title: String, width: CGFloat)],
+                                   columns: [(id: String, title: String, width: CGFloat, isFlex: Bool)],
                                    action: Selector, isFeature: Bool) {
         let bg = makeSectionBg()
         bg.translatesAutoresizingMaskIntoConstraints = false
@@ -631,13 +632,13 @@ class LogitechHIDDebugPanel: NSObject {
             .foregroundColor: NSColor.secondaryLabelColor,
             .font: NSFont.systemFont(ofSize: 10, weight: .medium),
         ]
-        for (id, title, w) in columns {
+        for (id, title, w, isFlex) in columns {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             let headerCell = DarkHeaderCell(textCell: title)
             headerCell.attributedStringValue = NSAttributedString(string: title, attributes: headerAttrs)
             c.headerCell = headerCell
-            if w > 0 { c.width = w; c.resizingMask = isFeature ? [] : [] }
-            else { c.width = 100; c.resizingMask = .autoresizingMask }
+            c.width = w > 0 ? w : 100
+            c.resizingMask = isFlex ? .autoresizingMask : []
             table.addTableColumn(c)
         }
         sv.documentView = table
