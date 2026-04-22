@@ -1629,13 +1629,20 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
                 string: primaryText,
                 attributes: [.foregroundColor: NSColor.labelColor, .font: nameFont]
             )
-            attr.append(NSAttributedString(
-                string: "  \(role)",
-                attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: badgeFont]
-            ))
-            if session.isHIDPPCandidate {
+            // Skip role for receiver rows — it's always "vendor" and carries no distinguishing
+            // info (receiver HID interfaces live under usagePage 0xFF00/0xFF43/0xFFC0). Keep it
+            // for non-receiver (direct-connect mouse/kbd) where "mouse"/"kbd" actually helps.
+            if !node.isReceiver {
                 attr.append(NSAttributedString(
-                    string: " · ",
+                    string: "  \(role)",
+                    attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: badgeFont]
+                ))
+            }
+            if session.isHIDPPCandidate {
+                // No "·" separator when there is no role prefix to separate from.
+                let separator = node.isReceiver ? "  " : " · "
+                attr.append(NSAttributedString(
+                    string: separator,
                     attributes: [.foregroundColor: NSColor.quaternaryLabelColor, .font: badgeFont]
                 ))
                 attr.append(NSAttributedString(
