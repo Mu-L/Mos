@@ -69,6 +69,15 @@ class LogitechDeviceSession {
     private var reprogInitComplete: Bool = false  // init 完成后, function 0 = button event 而非 GetControlCount
     private var reportingQueryIndex: Int = 0      // GetControlReporting 逐按键查询进度
 
+    /// 握手终态: receiver 枚举完成 / direct 设备 discovery 走到终点(成功或失败).
+    /// sidebar 圆点据此判定 Ready vs Initializing; 与 reprogInitComplete 不同 —— 后者不覆盖
+    /// "REPROG 不可用"/"GetControlCount=0" 等 discovery 失败分支.
+    private var handshakeComplete: Bool = false
+
+    /// 当前是否正在进行 discovery 握手 (setTargetSlot/rediscoverFeatures 触发, 完成/失败后清零).
+    /// UI 据此显示 spinner; 和 handshakeComplete 不同 —— 前者表达"飞行中", 后者表达"终态达成".
+    private var discoveryInFlight: Bool = false
+
     struct ControlInfo {
         let cid: UInt16
         let taskId: UInt16
@@ -190,6 +199,9 @@ class LogitechDeviceSession {
         return discoveredControls.first(where: { $0.cid == cid })
     }
     var debugReprogInitComplete: Bool { reprogInitComplete }
+    var debugHandshakeComplete: Bool { handshakeComplete }
+    var debugDiscoveryInFlight: Bool { discoveryInFlight }
+    var debugIsReceiver: Bool { connectionMode == .receiver }
     var debugDeviceIndex: UInt8 { deviceIndex }
     var debugIsBLE: Bool { isBLE }
     var debugDeviceOpened: Bool { deviceOpened }
@@ -239,6 +251,10 @@ class LogitechDeviceSession {
         }
 
         setupInputReportCallback()
+
+        // 标记初次 discovery 开始 (覆盖 receiver enumeration + BLE direct discovery + 缓存验证),
+        // UI 打开 debug panel 时能看到 Initializing spinner.
+        setDiscoveryInFlight(true)
 
         // Receiver 模式: 先枚举 slot, 找到在线设备后自动 target + feature discovery
         if connectionMode == .receiver {
@@ -357,8 +373,11 @@ class LogitechDeviceSession {
 
     private func startFreshDiscovery(tag: String) {
         discoverFeature(featureId: Self.featureReprogV4) { [weak self] index in
-            guard let self = self, let index = index else {
+            guard let self = self else { return }
+            guard let index = index else {
                 LogitechHIDDebugPanel.log("\(tag) REPROG_CONTROLS_V4 not available")
+                // Discovery 走到终点但未命中 REPROG, 仍算握手完成 (Mos 能做的已经做完).
+                self.markHandshakeComplete()
                 return
             }
             self.featureIndex[Self.featureReprogV4] = index
@@ -367,6 +386,22 @@ class LogitechDeviceSession {
             Self.saveCachedFeatureIndex(for: self.deviceInfo.productId, featureMap: self.featureIndex)
             self.sendGetControlCount(featureIndex: index)
         }
+    }
+
+    /// 置 handshake 终态并通知 sidebar 刷新.
+    /// 同一 session 多次调用安全 (仅在首次 false→true 过渡时 post).
+    private func markHandshakeComplete() {
+        setDiscoveryInFlight(false)
+        guard !handshakeComplete else { return }
+        handshakeComplete = true
+        NotificationCenter.default.post(name: LogitechHIDManager.sessionChangedNotification, object: nil)
+    }
+
+    /// discoveryInFlight 切换 + 通知. idempotent: 只在状态变化时 post.
+    private func setDiscoveryInFlight(_ flag: Bool) {
+        guard discoveryInFlight != flag else { return }
+        discoveryInFlight = flag
+        NotificationCenter.default.post(name: LogitechHIDManager.discoveryStateDidChangeNotification, object: nil)
     }
 
     private func discoverFeature(featureId: UInt16, completion: @escaping (UInt8?) -> Void) {
@@ -444,23 +479,34 @@ class LogitechDeviceSession {
     // MARK: - Debug Operations (interactive divert control)
 
     func rediscoverFeatures() {
+        cancelInflightDiscovery()
         featureIndex.removeAll()
         discoveredControls.removeAll()
         reprogInitComplete = false
+        handshakeComplete = false  // 允许 markHandshakeComplete 再次 post sessionChanged 以刷右侧面板
         reprogControlCount = 0
         reprogQueryIndex = 0
+        reportingQueryIndex = 0
         divertedCIDs.removeAll()
         lastActiveCIDs.removeAll()
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Re-discovering features...")
-        discoverFeature(featureId: Self.featureReprogV4) { [weak self] index in
-            guard let self = self, let index = index else {
-                LogitechHIDDebugPanel.log("[\(self?.deviceInfo.name ?? "?")] REPROG_CONTROLS_V4 not available")
-                return
-            }
-            self.featureIndex[Self.featureReprogV4] = index
-            LogitechHIDDebugPanel.log("[\(self.deviceInfo.name)] REPROG_CONTROLS_V4 at index \(String(format: "0x%02X", index))")
-            self.sendGetControlCount(featureIndex: index)
-        }
+        setDiscoveryInFlight(true)
+        // 复用 startFreshDiscovery 的完整握手流程: 成功走 sendGetControlCount,
+        // REPROG 不可用分支会 markHandshakeComplete(), 避免卡在 initializing.
+        startFreshDiscovery(tag: "[\(deviceInfo.name)]")
+    }
+
+    /// 取消所有正在进行的 discovery/query timer 与 pending callback.
+    /// 用途: 用户连续切 slot 或手动 rediscover 时, 防止上一轮响应/超时推进
+    /// advance...() 流程, 避免错误把新 target 标为 ready.
+    /// 只清 dict 不主动触发 callback(nil): 旧响应到达时找不到 callback 自然被忽略,
+    /// 避免触发 markHandshakeComplete 造成 ready→init 的 UI 闪烁.
+    private func cancelInflightDiscovery() {
+        discoveryTimer?.invalidate(); discoveryTimer = nil
+        controlInfoQueryTimer?.invalidate(); controlInfoQueryTimer = nil
+        reportingQueryTimer?.invalidate(); reportingQueryTimer = nil
+        pendingDiscovery.removeAll()
+        pendingCacheValidation = nil
     }
 
     func redivertAllControls() {
@@ -490,16 +536,19 @@ class LogitechDeviceSession {
     /// 切换目标 slot (debug 面板交互/自动选择)
     func setTargetSlot(slot: UInt8) {
         guard connectionMode == .receiver, slot >= 1, slot <= 6 else { return }
+        cancelInflightDiscovery()
         deviceIndex = slot
         // 重置 feature 状态, 等待新一轮 discovery
         featureIndex.removeAll()
         discoveredControls.removeAll()
         reprogInitComplete = false
+        handshakeComplete = false  // 允许 markHandshakeComplete 再次 post, 使 sidebar/panels 刷新回 loading/ready 切换
         reprogControlCount = 0
         reprogQueryIndex = 0
+        reportingQueryIndex = 0
         divertedCIDs.removeAll()
         lastActiveCIDs.removeAll()
-        pendingCacheValidation = nil
+        setDiscoveryInFlight(true)
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Target slot changed to \(slot)")
     }
 
@@ -696,8 +745,12 @@ class LogitechDeviceSession {
         } else {
             receiverEnumPhase = 0
             LogitechHIDDebugPanel.log("[\(deviceInfo.name)] No devices found on receiver")
+            // 无设备 -> 不会进 peripheral discovery, 此处必须清 inflight 防止 spinner 一直转.
+            setDiscoveryInFlight(false)
         }
 
+        // Receiver dongle 本身的握手 = slot ping 完成. 后续 peripheral discovery 状态与此独立.
+        handshakeComplete = true
         NotificationCenter.default.post(name: LogitechHIDManager.sessionChangedNotification, object: nil)
     }
 
@@ -1153,6 +1206,15 @@ class LogitechDeviceSession {
                 handleSlotPingResponse(devIdx: devIdx, report: report)
                 return
             }
+
+            // Stale-peripheral filter: 用户 retarget 后, 旧 slot 仍可能有 in-flight 响应抵达.
+            // 按 deviceIndex 过滤掉"非当前 target"的 peripheral 响应, 防止污染新一轮
+            // REPROG discovery state (append 错误 control / advance 错误 index).
+            // 0xFF (receiver register) 和 pending ping 已在上面各自处理, 不会进入这里.
+            if devIdx >= 1 && devIdx <= 6 && devIdx != deviceIndex {
+                LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Stale report from slot \(devIdx) (current target=\(deviceIndex)) dropped")
+                return
+            }
         }
 
         // HID++ 2.0 Error report
@@ -1391,6 +1453,9 @@ class LogitechDeviceSession {
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] GetControlCount = \(reprogControlCount)")
         if reprogControlCount > 0, let idx = featureIndex[Self.featureReprogV4] {
             sendGetControlInfo(featureIndex: idx, index: 0)
+        } else {
+            // 设备声明 0 个可编程控件: discovery 走到终点, 记为握手完成.
+            markHandshakeComplete()
         }
     }
 
@@ -1464,8 +1529,10 @@ class LogitechDeviceSession {
             sendGetControlReporting(featureIndex: reprogIdx, controlIndex: reportingQueryIndex)
         } else {
             LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Reporting query complete")
-            NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
             divertBoundControls()
+            // 先让 divertBoundControls 置 reprogInitComplete=true / handshakeComplete=true, 再通知
+            // 观察者, 避免 main-queue observer 在状态翻转前就读到 stale 值.
+            NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
         }
     }
 
@@ -1504,6 +1571,8 @@ class LogitechDeviceSession {
     /// 跨启动残留: 本进程 Set 为空, 仅能处理当前 bound CID; 曾绑定但已解绑的残留依赖设备断电/重连自然清除 (tmpDivert 固件态).
     private func divertBoundControls() {
         reprogInitComplete = true
+        handshakeComplete = true
+        setDiscoveryInFlight(false)
         lastActiveCIDs.removeAll()
         syncDivertWithBindings()
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")

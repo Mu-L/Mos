@@ -161,9 +161,9 @@ class LogitechHIDDebugPanel: NSObject {
     // MARK: - Layout Constants
 
     private struct L {
-        static let defaultWidth: CGFloat = 1100
+        static let defaultWidth: CGFloat = 1200
         static let defaultHeight: CGFloat = 750
-        static let minWidth: CGFloat = 1100
+        static let minWidth: CGFloat = 1200
         static let minHeight: CGFloat = 600
         static let sidebarWidth: CGFloat = 180
         static let actionsWidth: CGFloat = 160
@@ -219,7 +219,13 @@ class LogitechHIDDebugPanel: NSObject {
     private var logObserver: NSObjectProtocol?
     private var sessionObserver: NSObjectProtocol?
     private var reportingCompleteObserver: NSObjectProtocol?
+    private var discoveryStateObserver: NSObjectProtocol?
+    private var spinnerObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
+
+    // Header 文本基座 (不含 spinner 后缀); spinner tick 时与当前帧拼接.
+    private var featuresHeaderBase: String = "FEATURES (0)"
+    private var controlsHeaderBase: String = "CONTROLS (0)"
 
     // MARK: - Sidebar Data
 
@@ -489,7 +495,7 @@ class LogitechHIDDebugPanel: NSObject {
         configureDarkScroll(infoScroll)
 
         let allKeys = ["VID", "PID", "Protocol", "Transport", "Dev Index", "Conn Mode", "Opened",
-                        "UsagePage", "Usage", "HID++ Cand", "Init Done", "Dvrt CIDs"]
+                        "UsagePage", "Usage", "HID++ Cand", "Init Done", "Dvrt CIDs", "Target"]
         let contentH: CGFloat = CGFloat(allKeys.count) * 16 + L.pad
         let infoDoc = FlippedView(frame: NSRect(x: 0, y: 0, width: L.sidebarWidth, height: contentH))
         var iy: CGFloat = L.pad
@@ -534,6 +540,11 @@ class LogitechHIDDebugPanel: NSObject {
             slot.session.setTargetSlot(slot: slot.slot)
             refreshRightPanelsLoading()
             slot.session.rediscoverFeatures()
+            // 与 rediscoverClicked 行为对齐: 6s 后兜底刷一次, 防止 Bolt 响应丢包导致 UI 卡在 loading.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.refreshSidebar()
+                self?.refreshRightPanels()
+            }
         }
     }
 
@@ -547,7 +558,9 @@ class LogitechHIDDebugPanel: NSObject {
         let fcSplit = HorizontalSplitView()
         fcSplit.isVertical = true
         fcSplit.dividerStyle = .thin
-        fcSplit.autosaveName = "HIDDebug.FeaturesControls.v2"
+        // v3: 提高 Controls 默认宽度以放下 CID(60) + Name(150) + Flags(200) + Status(50) = 460pt
+        //     而不依赖 uniform autoresize 把余量分给弹性列. 换 name 让旧 v2 位置作废.
+        fcSplit.autosaveName = "HIDDebug.FeaturesControls.v3"
         fcSplit.delegate = self
         fcSplit.translatesAutoresizingMaskIntoConstraints = false
         parent.addSubview(fcSplit)
@@ -570,16 +583,20 @@ class LogitechHIDDebugPanel: NSObject {
         // to show worst-case strings ("Mouse,Reprog,Divert,RawXY", "3rd-DVRT") without
         // truncation. autosaveName preserves any user-chosen position over this default.
         let fCol = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 280))
-        let cCol = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 280))
+        let cCol = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 280))
         fcSplit.addSubview(fCol)
         fcSplit.addSubview(cCol)
 
         buildTableColumn(in: fCol, headerTag: 100, headerText: "FEATURES (0)", tableTag: 200,
-                          columns: [("fIdx", "Idx", 36, false), ("fId", "ID", 50, false), ("fName", "Name", 160, true)],
+                          columns: [("fIdx", "Idx", 36, 36, false),
+                                    ("fId", "ID", 50, 50, false),
+                                    ("fName", "Name", 160, 120, true)],
                           action: #selector(featureTableClicked(_:)), isFeature: true)
         buildTableColumn(in: cCol, headerTag: 101, headerText: "CONTROLS (0)", tableTag: 201,
-                          columns: [("cCid", "CID", 50, false), ("cName", "Name", 150, true),
-                                    ("cFlags", "Flags", 170, true), ("cStatus", "Status", 78, true)],
+                          columns: [("cCid", "CID", 60, 60, false),
+                                    ("cName", "Name", 140, 120, true),
+                                    ("cFlags", "Flags", 190, 170, true),
+                                    ("cStatus", "Status", 68, 68, false)],
                           action: #selector(controlsTableClicked(_:)), isFeature: false)
         buildActionsPanel(in: aCol)
     }
@@ -587,7 +604,7 @@ class LogitechHIDDebugPanel: NSObject {
     /// Build a table column section: bg + section header + dark column headers + scrollView/table
     private func buildTableColumn(in parent: NSView, headerTag: Int, headerText: String,
                                    tableTag: Int,
-                                   columns: [(id: String, title: String, width: CGFloat, isFlex: Bool)],
+                                   columns: [(id: String, title: String, width: CGFloat, minWidth: CGFloat, isFlex: Bool)],
                                    action: Selector, isFeature: Bool) {
         let bg = makeSectionBg()
         bg.translatesAutoresizingMaskIntoConstraints = false
@@ -636,17 +653,22 @@ class LogitechHIDDebugPanel: NSObject {
             .foregroundColor: NSColor.secondaryLabelColor,
             .font: NSFont.systemFont(ofSize: 10, weight: .medium),
         ]
-        for (id, title, w, isFlex) in columns {
+        for (id, title, w, minW, isFlex) in columns {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             let headerCell = DarkHeaderCell(textCell: title)
             headerCell.attributedStringValue = NSAttributedString(string: title, attributes: headerAttrs)
             c.headerCell = headerCell
+            c.minWidth = minW > 0 ? minW : 40
             c.width = w > 0 ? w : 100
             c.resizingMask = isFlex ? .autoresizingMask : []
             table.addTableColumn(c)
         }
         sv.documentView = table
-        table.sizeLastColumnToFit()
+        // Features 只有一列弹性(Name)且在最后位, sizeLastColumnToFit 合适.
+        // Controls 的最后列是 Status(固定 50pt, 不该被拉大), 跳过这个调用避免覆盖.
+        if isFeature {
+            table.sizeLastColumnToFit()
+        }
 
         if isFeature { self.featureTableView = table }
         else { self.controlsTableView = table }
@@ -1236,8 +1258,13 @@ class LogitechHIDDebugPanel: NSObject {
         controlRows.removeAll()
         featureTableView?.reloadData()
         controlsTableView?.reloadData()
-        updateHeaderLabel(tag: 100, text: "FEATURES (...)")
-        updateHeaderLabel(tag: 101, text: "CONTROLS (...)")
+        // Stale UI 一起清: selection / device info 都会在握手完成后重建.
+        selectedFeatureId = nil
+        selectedControlCID = nil
+        featuresHeaderBase = "FEATURES (...)"
+        controlsHeaderBase = "CONTROLS (...)"
+        renderRightPanelHeaders()
+        refreshDeviceInfo()
         updateContextActions()
     }
 
@@ -1345,10 +1372,28 @@ class LogitechHIDDebugPanel: NSObject {
             s.isHIDPPCandidate ? "Yes" : "No",
             s.debugReprogInitComplete ? "Yes" : "No",
             "\(s.debugDivertedCIDs.count)",
+            targetDisplay(for: s),
         ]
         for (i, val) in moreVals.enumerated() where i < moreInfoLabels.count {
             moreInfoLabels[i].value.stringValue = val
         }
+    }
+
+    /// Receiver session 在指向某个 slot peripheral 时, 返回 "<peripheral name> (0xWPID)";
+    /// 否则返回 "--".
+    private func targetDisplay(for session: LogitechDeviceSession) -> String {
+        guard session.connectionMode == .receiver,
+              session.debugDeviceIndex >= 1, session.debugDeviceIndex <= 6 else {
+            return "--"
+        }
+        let idx = Int(session.debugDeviceIndex) - 1
+        let paired = session.debugReceiverPairedDevices
+        guard idx < paired.count, paired[idx].isConnected else { return "--" }
+        let dev = paired[idx]
+        let nameSegment = dev.name.isEmpty ? "Slot \(dev.slot)" : dev.name
+        return dev.wirelessPID == 0
+            ? nameSegment
+            : String(format: "%@ (0x%04X)", nameSegment, dev.wirelessPID)
     }
 
     private func refreshFeatureTable() {
@@ -1363,7 +1408,8 @@ class LogitechHIDDebugPanel: NSObject {
                     featureIdHex: String(format: "0x%04X", featureId), name: name)
         }
         featureTableView?.reloadData()
-        updateHeaderLabel(tag: 100, text: "FEATURES (\(featureRows.count))")
+        featuresHeaderBase = "FEATURES (\(featureRows.count))"
+        renderRightPanelHeaders()
     }
 
     private func refreshControls() {
@@ -1374,16 +1420,26 @@ class LogitechHIDDebugPanel: NSObject {
         }
         controlRows = s.debugDiscoveredControls
         controlsTableView?.reloadData()
-        updateHeaderLabel(tag: 101, text: "CONTROLS (\(controlRows.count))")
+        controlsHeaderBase = "CONTROLS (\(controlRows.count))"
+        renderRightPanelHeaders()
     }
 
-    private func updateHeaderLabel(tag: Int, text: String) {
+    private func applyHeaderLabel(tag: Int, text: String) {
         func find(in view: NSView) -> NSTextField? {
             if let tf = view as? NSTextField, tf.tag == tag { return tf }
             for sub in view.subviews { if let f = find(in: sub) { return f } }
             return nil
         }
         if let cv = window?.contentView, let lbl = find(in: cv) { lbl.stringValue = text }
+    }
+
+    /// Refresh FEATURES/CONTROLS headers with current base text, appending the
+    /// Braille spinner glyph when the active session is still in discovery flight.
+    private func renderRightPanelHeaders() {
+        let inflight = currentSession?.debugDiscoveryInFlight ?? false
+        let suffix = inflight ? "  \(BrailleSpinner.shared.currentFrame)" : ""
+        applyHeaderLabel(tag: 100, text: featuresHeaderBase + suffix)
+        applyHeaderLabel(tag: 101, text: controlsHeaderBase + suffix)
     }
 
     // MARK: - Observers
@@ -1417,7 +1473,27 @@ class LogitechHIDDebugPanel: NSObject {
         reportingCompleteObserver = NotificationCenter.default.addObserver(
             forName: LogitechHIDManager.reportingQueryDidCompleteNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.refreshRightPanels() }
+        ) { [weak self] _ in
+            // Sidebar 状态圆点会从 Initializing 切到 Ready, 需要跟随 reprog init 完成一起刷新.
+            self?.refreshSidebar()
+            self?.refreshRightPanels()
+        }
+        discoveryStateObserver = NotificationCenter.default.addObserver(
+            forName: LogitechHIDManager.discoveryStateDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // Discovery 进/出 flight: 刷 header (spinner 显隐) + sidebar (slot 行 spinner).
+            self?.renderRightPanelHeaders()
+            self?.refreshSidebar()
+        }
+        spinnerObserver = NotificationCenter.default.addObserver(
+            forName: BrailleSpinner.didTickNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Spinner tick: 只在仍在 flight 时更新, 否则空跑浪费.
+            guard self?.currentSession?.debugDiscoveryInFlight == true else { return }
+            self?.renderRightPanelHeaders()
+            self?.refreshSpinningSlotRow()
+        }
     }
 
     private func stopObserving() {
@@ -1426,6 +1502,14 @@ class LogitechHIDDebugPanel: NSObject {
         if let o = reportingCompleteObserver {
             NotificationCenter.default.removeObserver(o)
             reportingCompleteObserver = nil
+        }
+        if let o = discoveryStateObserver {
+            NotificationCenter.default.removeObserver(o)
+            discoveryStateObserver = nil
+        }
+        if let o = spinnerObserver {
+            NotificationCenter.default.removeObserver(o)
+            spinnerObserver = nil
         }
         // Layout observers (frame change) are not tracked here — they're tied to the views
         // and auto-removed when the views are deallocated.
@@ -1599,83 +1683,291 @@ extension LogitechHIDDebugPanel: NSOutlineViewDataSource {
 }
 
 extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        // Device 行两行布局, slot 行保持单行.
+        return (item is DeviceNode) ? Self.deviceRowHeight : 22
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
+        // 空 slot 不可选中: 视觉已经降级, 再阻止 selection 避免 highlight 落在空行.
+        if let slot = item as? SlotNode {
+            let paired = slot.session.debugReceiverPairedDevices
+            let idx = Int(slot.slot) - 1
+            guard idx >= 0, idx < paired.count, paired[idx].isConnected else { return false }
+        }
+        return true
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        if let node = item as? DeviceNode {
+            let cell = makeDeviceRowCell(in: outlineView)
+            cell.textField?.attributedStringValue = renderDeviceRowPrimary(node: node)
+
+            if let secondary = cell.viewWithTag(Self.secondaryTextTag) as? NSTextField {
+                secondary.attributedStringValue = renderDeviceRowSecondary(node: node)
+            }
+
+            let status = sidebarStatus(for: node.session)
+            if let dot = cell.viewWithTag(Self.statusDotTag) as? NSTextField {
+                dot.stringValue = status.glyph
+                dot.textColor = status.color
+                dot.toolTip = status.accessibilityLabel
+                dot.setAccessibilityLabel(status.accessibilityLabel)
+            }
+            return cell
+        }
+
         let cellId = NSUserInterfaceItemIdentifier("DeviceCell")
         let cell = makeCenteredTableCell(in: outlineView, identifier: cellId, font: NSFont.systemFont(ofSize: 11))
         guard let label = cell.textField else { return cell }
 
-        if let node = item as? DeviceNode {
-            let prefix = node.isReceiver ? "[R]" : "[M]"
-            let session = node.session
-
-            // 根据 usagePage/usage 推出接口角色 (区分同 receiver 下的多个 HID 接口)
-            let role: String
-            switch (session.usagePage, session.usage) {
-            case (0x0001, 0x0002): role = "mouse"
-            case (0x0001, 0x0006): role = "kbd"
-            case (0x0001, 0x0001): role = "pointer"
-            case (0x0001, 0x0080): role = "sys"
-            case (0x000C, _):      role = "consumer"
-            case (0xFF00, _), (0xFF43, _), (0xFFC0, _): role = "vendor"
-            default: role = String(format: "%04X/%02X", session.usagePage, session.usage)
-            }
-
-            let nameFont = NSFont.systemFont(ofSize: 11)
-            let badgeFont = NSFont.systemFont(ofSize: 10)
-            let badgeFontBold = NSFont.systemFont(ofSize: 10, weight: .medium)
-
-            let primaryText = node.isReceiver ? prefix : "\(prefix) \(session.deviceInfo.name)"
-            let attr = NSMutableAttributedString(
-                string: primaryText,
-                attributes: [.foregroundColor: NSColor.labelColor, .font: nameFont]
-            )
-            // Skip role for receiver rows — it's always "vendor" and carries no distinguishing
-            // info (receiver HID interfaces live under usagePage 0xFF00/0xFF43/0xFFC0). Keep it
-            // for non-receiver (direct-connect mouse/kbd) where "mouse"/"kbd" actually helps.
-            if !node.isReceiver {
-                attr.append(NSAttributedString(
-                    string: "  \(role)",
-                    attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: badgeFont]
-                ))
-            }
-            if session.isHIDPPCandidate {
-                // No "·" separator when there is no role prefix to separate from.
-                let separator = node.isReceiver ? "  " : " · "
-                attr.append(NSAttributedString(
-                    string: separator,
-                    attributes: [.foregroundColor: NSColor.quaternaryLabelColor, .font: badgeFont]
-                ))
-                attr.append(NSAttributedString(
-                    string: "HID++",
-                    attributes: [.foregroundColor: NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.9),
-                                 .font: badgeFontBold]
-                ))
-            }
-            attr.append(NSAttributedString(string: " "))
-            attr.append(NSAttributedString(
-                string: "\u{25CF}",
-                attributes: [.foregroundColor: NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0),
-                             .font: NSFont.systemFont(ofSize: 8)]
-            ))
-            label.attributedStringValue = attr
-        } else if let slot = item as? SlotNode {
+        if let slot = item as? SlotNode {
             let paired = slot.session.debugReceiverPairedDevices
             let idx = Int(slot.slot) - 1
             guard idx >= 0, idx < paired.count else {
                 label.stringValue = "Slot \(slot.slot): --"
-                label.textColor = .tertiaryLabelColor
+                label.textColor = .quaternaryLabelColor
                 return cell
             }
             let dev = paired[idx]
+            let baseText: String
             if dev.isConnected {
-                label.stringValue = dev.name.isEmpty ? "Slot \(dev.slot)" : dev.name
+                baseText = dev.name.isEmpty ? "Slot \(dev.slot)" : dev.name
                 label.textColor = .labelColor
             } else {
-                label.stringValue = "Slot \(dev.slot): empty"
-                label.textColor = .tertiaryLabelColor
+                // 空 slot: 视觉显式降级, 暗示不可点击.
+                baseText = "Slot \(dev.slot): empty"
+                label.textColor = .quaternaryLabelColor
+            }
+            // 当前正 target 这个 slot 且 discovery 在 flight 时, 末尾追加 spinner.
+            if isSlotSpinning(slot) {
+                label.stringValue = "\(baseText)  \(BrailleSpinner.shared.currentFrame)"
+            } else {
+                label.stringValue = baseText
             }
         }
         return cell
+    }
+
+    /// 当前 slot 是否正处于 discovery flight (用于决定是否显示 spinner 字符).
+    private func isSlotSpinning(_ slot: SlotNode) -> Bool {
+        let session = slot.session
+        return session.debugIsReceiver
+            && session.debugDiscoveryInFlight
+            && session.debugDeviceIndex == slot.slot
+    }
+
+    /// 增量刷新正在 spinning 的 slot 行 (避免整表 reload 引发滚动/选择抖动).
+    fileprivate func refreshSpinningSlotRow() {
+        guard let outline = outlineView else { return }
+        for row in 0..<outline.numberOfRows {
+            if let slotNode = outline.item(atRow: row) as? SlotNode,
+               isSlotSpinning(slotNode) {
+                outline.reloadItem(slotNode)
+            }
+        }
+    }
+
+    // MARK: - Sidebar Row Rendering
+
+    fileprivate static let statusDotTag = 920501
+    fileprivate static let secondaryTextTag = 920502
+    fileprivate static let statusDotWidth: CGFloat = 14
+    fileprivate static let deviceRowHeight: CGFloat = 40
+    fileprivate static let rowInsetH: CGFloat = 6
+
+    /// 为 DeviceNode 行构建两行 cell:
+    ///   [primary: 设备名]                                  [● status dot]
+    ///   [secondary: Bluetooth · Mouse · HID++]
+    /// status dot 垂直居中对齐主文本, 固定 trailing 不被压缩.
+    private func makeDeviceRowCell(in outlineView: NSOutlineView) -> NSTableCellView {
+        let identifier = NSUserInterfaceItemIdentifier("DeviceRowCell")
+        if let existing = outlineView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView {
+            return existing
+        }
+        let view = NSTableCellView()
+        view.identifier = identifier
+
+        let primary = NSTextField(labelWithString: "")
+        primary.translatesAutoresizingMaskIntoConstraints = false
+        primary.backgroundColor = .clear
+        primary.isBezeled = false
+        primary.isEditable = false
+        primary.isSelectable = false
+        // 必须显式设置和 attributedString 一致的字号, 否则 intrinsic size
+        // 会按 label 默认 13pt 计算, 字形在 frame 内偏下导致视觉上下不对称.
+        primary.font = NSFont.systemFont(ofSize: 11)
+        primary.maximumNumberOfLines = 1
+        primary.cell?.usesSingleLineMode = true
+        primary.lineBreakMode = .byTruncatingTail
+        primary.cell?.truncatesLastVisibleLine = true
+        primary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.textField = primary
+        view.addSubview(primary)
+
+        let secondary = NSTextField(labelWithString: "")
+        secondary.tag = Self.secondaryTextTag
+        secondary.translatesAutoresizingMaskIntoConstraints = false
+        secondary.backgroundColor = .clear
+        secondary.isBezeled = false
+        secondary.isEditable = false
+        secondary.isSelectable = false
+        secondary.font = NSFont.systemFont(ofSize: 10)
+        secondary.maximumNumberOfLines = 1
+        secondary.cell?.usesSingleLineMode = true
+        secondary.lineBreakMode = .byTruncatingTail
+        secondary.cell?.truncatesLastVisibleLine = true
+        secondary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.addSubview(secondary)
+
+        let dot = NSTextField(labelWithString: "")
+        dot.tag = Self.statusDotTag
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.backgroundColor = .clear
+        dot.isBezeled = false
+        dot.isEditable = false
+        dot.isSelectable = false
+        dot.alignment = .right
+        dot.font = NSFont.systemFont(ofSize: 9)
+        dot.setContentHuggingPriority(.required, for: .horizontal)
+        dot.setContentCompressionResistancePriority(.required, for: .horizontal)
+        view.addSubview(dot)
+
+        // 两行文本用一个 invisible container 包裹后在 view 中垂直居中,
+        // 避免直接把 top/bottom 等额 padding 加到 view 上后因字体 metric 不均
+        // 导致视觉不对称 (primary 上方留白远大于 secondary 下方).
+        let textStack = NSView()
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        textStack.addSubview(primary)
+        textStack.addSubview(secondary)
+        view.addSubview(textStack)
+
+        NSLayoutConstraint.activate([
+            // Stack: centered vertically within row, horizontally between leading inset and dot
+            textStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            textStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.rowInsetH),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: dot.leadingAnchor, constant: -6),
+
+            // Primary fills stack top
+            primary.topAnchor.constraint(equalTo: textStack.topAnchor),
+            primary.leadingAnchor.constraint(equalTo: textStack.leadingAnchor),
+            primary.trailingAnchor.constraint(lessThanOrEqualTo: textStack.trailingAnchor),
+
+            // Secondary directly below primary; its bottom pins stack bottom
+            secondary.topAnchor.constraint(equalTo: primary.bottomAnchor, constant: 2),
+            secondary.leadingAnchor.constraint(equalTo: textStack.leadingAnchor),
+            secondary.trailingAnchor.constraint(lessThanOrEqualTo: textStack.trailingAnchor),
+            secondary.bottomAnchor.constraint(equalTo: textStack.bottomAnchor),
+
+            // Status dot aligned to primary (not view center) so it sits with the primary name
+            dot.widthAnchor.constraint(equalToConstant: Self.statusDotWidth),
+            dot.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.rowInsetH),
+            dot.centerYAnchor.constraint(equalTo: primary.centerYAnchor),
+        ])
+        return view
+    }
+
+    /// Sidebar 行状态 (影响右侧圆点的颜色 + 形状).
+    /// 颜色 + 形状双编码, 避免纯色盲场景下 ready/initializing 难以区分.
+    private enum SidebarRowStatus {
+        case ready        // 握手完成, 可通信或已完成枚举
+        case initializing // 已打开接口, 握手进行中
+        case observer     // 非 HID++ 候选接口; 仅监听广播, 不主动通信
+
+        var color: NSColor {
+            switch self {
+            case .ready:        return NSColor(calibratedRed: 0.30, green: 0.78, blue: 0.36, alpha: 1.0)
+            case .initializing: return NSColor(calibratedRed: 1.00, green: 0.75, blue: 0.00, alpha: 0.9)
+            case .observer:     return NSColor.tertiaryLabelColor
+            }
+        }
+        /// ● 实心圆 = 通道已就绪; ◐ 半圆 = 握手进行中; ○ 空心圆 = 仅观察
+        var glyph: String {
+            switch self {
+            case .ready:        return "\u{25CF}"
+            case .initializing: return "\u{25D0}"
+            case .observer:     return "\u{25CB}"
+            }
+        }
+        var accessibilityLabel: String {
+            switch self {
+            case .ready:        return "Ready"
+            case .initializing: return "Initializing"
+            case .observer:     return "Observer"
+            }
+        }
+    }
+
+    private func sidebarStatus(for session: LogitechDeviceSession) -> SidebarRowStatus {
+        // 非候选接口一律记为 Observer (OS 看得到, Mos 不通信).
+        if !session.isHIDPPCandidate { return .observer }
+        // handshakeComplete 覆盖所有终态 (receiver: ping 完成; direct: discovery 走到终点).
+        return session.debugHandshakeComplete ? .ready : .initializing
+    }
+
+    /// HID 接口的"角色" (同一设备暴露多条 HID 接口时用于区分).
+    /// Mouse / Keyboard / Consumer Control / Pointer / System Control / Vendor-specific
+    private func interfaceRole(for session: LogitechDeviceSession) -> String {
+        switch (session.usagePage, session.usage) {
+        case (0x0001, 0x0002): return "Mouse"
+        case (0x0001, 0x0006): return "Keyboard"
+        case (0x0001, 0x0001): return "Pointer"
+        case (0x0001, 0x0080): return "System Control"
+        case (0x000C, _):      return "Consumer Control"
+        case (0xFF00, _), (0xFF43, _), (0xFFC0, _): return "Vendor"
+        default: return String(format: "Usage %04X/%02X", session.usagePage, session.usage)
+        }
+    }
+
+    /// 主行: 设备名 (接收器用 Registry 型号名, 直连用产品名).
+    private func renderDeviceRowPrimary(node: DeviceNode) -> NSAttributedString {
+        let session = node.session
+        let primaryName: String = node.isReceiver
+            ? LogitechReceiverRegistry.displayName(forPID: session.deviceInfo.productId)
+            : session.deviceInfo.name
+        return NSAttributedString(
+            string: primaryName,
+            attributes: [
+                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.systemFont(ofSize: 11),
+            ]
+        )
+    }
+
+    /// 副行: 传输方式 · 接口角色 · HID++ 协议标记.
+    /// 接收器名本身已含类型, 所以不重复 transport/role, 只显示协议标记.
+    private func renderDeviceRowSecondary(node: DeviceNode) -> NSAttributedString {
+        let session = node.session
+        let meta     = NSFont.systemFont(ofSize: 10)
+        let metaBold = NSFont.systemFont(ofSize: 10, weight: .medium)
+
+        var segments: [String] = []
+        if !node.isReceiver {
+            segments.append(session.debugIsBLE ? "Bluetooth" : "USB")
+            segments.append(interfaceRole(for: session))
+        }
+        if session.isHIDPPCandidate {
+            segments.append("HID++")
+        }
+
+        let line = NSMutableAttributedString()
+        for (index, segment) in segments.enumerated() {
+            if index > 0 {
+                line.append(NSAttributedString(
+                    string: " · ",
+                    attributes: [.foregroundColor: NSColor.quaternaryLabelColor, .font: meta]
+                ))
+            }
+            let isHIDPP = segment == "HID++"
+            line.append(NSAttributedString(
+                string: segment,
+                attributes: [
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                    .font: isHIDPP ? metaBold : meta,
+                ]
+            ))
+        }
+        return line
     }
 }
 

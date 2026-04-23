@@ -133,6 +133,9 @@ class LogitechHIDManager {
 
     static let sessionChangedNotification = NSNotification.Name("LogitechHIDSessionChanged")
 
+    /// 某个 session 的 discovery 握手流程开始或结束时触发; UI 据此切换 spinner.
+    static let discoveryStateDidChangeNotification = NSNotification.Name("LogitechHIDDiscoveryStateDidChange")
+
     /// 某个 session 完成 reporting 查询后触发, UI 可据此刷新冲突指示.
     static let reportingQueryDidCompleteNotification = NSNotification.Name("LogitechHIDReportingQueryDidComplete")
 
