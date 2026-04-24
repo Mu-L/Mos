@@ -2086,14 +2086,16 @@ extension LogitechHIDDebugPanel: NSTableViewDelegate {
         guard let label = cell.textField else { return cell }
         label.textColor = .labelColor
 
-        // 方案 B: reportingFlags 永远反映设备响应的真值 (Mos 不污染),
-        // 所以 reportingFlags 非零 = 第三方 (Options+ 等) 的 tmpDivert / persistDivert;
-        // targetCID != 0 = 第三方 remap (Mos 从不 remap);
-        // Mos 自己的 divert 视角通过 divertedCIDs 集合单独表达.
-        let isForeignDivert = ctrl.reportingFlags != 0
+        // reportingFlags 来自 GetControlReporting 的设备真实响应. 方案 B 让 Mos 不在本地改写它,
+        // 但任何一次后续回读 (Query Reporting / Re-Discover / 面板重入) 都会把 Mos 自己通过
+        // setControlReporting 置位的 bit 读回来 —— 所以 "reportingFlags != 0" 不能单独判为第三方.
+        // 真正的第三方冲突 = 设备侧非零 且 不在 Mos 的 divertedCIDs 集合里.
+        // 同一 CID 若被 Mos 与第三方同时 divert, 此处偏向 Mos 语义: ACTIONS 显示 Undivert 时
+        // Status 也显示 DVRT, 不会再出现 "按钮是 Undivert 但标签却是 3rd-DVRT" 的隐藏矛盾.
+        let isMosDivert = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
+        let isForeignDivert = ctrl.reportingFlags != 0 && !isMosDivert
         // self-remap (targetCID == cid) 是 Logitech 默认的 identity mapping, 不算 remap
         let isRemapped = ctrl.targetCID != 0 && ctrl.targetCID != ctrl.cid
-        let isMosDivert = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
 
         switch tableColumn?.identifier.rawValue {
         case "cCid": label.stringValue = String(format: "0x%04X", ctrl.cid)
