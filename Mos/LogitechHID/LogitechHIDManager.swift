@@ -75,6 +75,8 @@ class LogitechHIDManager {
         }
         hidManager = nil
         isActive = false
+        // sessions 被清空后重算一次, 把 lastKnownBusy 归位并让 UI 同步关闭 spinner.
+        recomputeAndNotifyActivityState()
         LogitechHIDDebugPanel.log("[LogitechHID] Stopped")
     }
 
@@ -117,6 +119,8 @@ class LogitechHIDManager {
         LogitechHIDDebugPanel.log("[LogitechHID] Device disconnected: \(session.deviceInfo.name)")
         session.teardown()
         NotificationCenter.default.post(name: Self.sessionChangedNotification, object: nil)
+        // 断开的 session 可能曾处于 busy 状态, 重新聚合一次防止 spinner 卡住.
+        recomputeAndNotifyActivityState()
     }
 
     // MARK: - Query
@@ -139,12 +143,43 @@ class LogitechHIDManager {
     /// 某个 session 完成 reporting 查询后触发, UI 可据此刷新冲突指示.
     static let reportingQueryDidCompleteNotification = NSNotification.Name("LogitechHIDReportingQueryDidComplete")
 
+    /// 任一 HID++ session 的活动状态 (discovery / reporting query) 发生变化时触发;
+    /// 聚合后只在 "全局是否忙碌" 翻转的瞬间 post, UI 订阅后用来驱动 activity spinner.
+    static let activityStateDidChangeNotification = NSNotification.Name("LogitechHIDActivityStateDidChange")
+
+    // MARK: - Activity State Aggregation
+
+    /// 最近一次已广播的聚合忙碌状态. 仅用于去抖 (transition-only post).
+    private var lastKnownBusy: Bool = false
+
+    /// 当前是否有任一 Logi session 正在执行 HID++ 交互 (discovery 或 reporting query).
+    /// UI 在 main thread 同步读此值, 零阻塞.
+    var isBusy: Bool { lastKnownBusy }
+
+    /// 由 session 在活动状态变化的关键位置调用 (setDiscoveryInFlight / startReportingQuery /
+    /// advanceReportingQuery 完成分支 / session 增删). Manager 聚合所有 session, 仅在全局
+    /// 忙碌状态翻转时广播 `activityStateDidChangeNotification`.
+    /// 调用链完全在 main thread (IOHIDManager 调度到 main RunLoop), 无需额外同步.
+    func recomputeAndNotifyActivityState() {
+        let newBusy = sessions.values.contains(where: { $0.isActivityInProgress })
+        guard newBusy != lastKnownBusy else { return }
+        lastKnownBusy = newBusy
+        NotificationCenter.default.post(name: Self.activityStateDidChangeNotification, object: nil)
+    }
+
+    /// UI hover popover 的数据源: 所有当前活跃 session 的状态快照.
+    /// popover 在可见时以低频 (~250ms) 拉取此快照而非订阅细粒度通知, 避免
+    /// reporting query 每次 advance 都产生 post 导致通知风暴.
+    var currentActivitySummary: [SessionActivityStatus] {
+        return sessions.values.compactMap { $0.activityStatus }
+    }
+
     // MARK: - Reporting Refresh Throttle
 
     /// 最小刷新间隔:避免 UI 事件频繁触发导致 HID++ 协议压力.
-    /// 用户的预期场景 (打开面板 / 切分页 / App 激活) 在 30s 内几乎不会产生新的冲突变化,
-    /// 取 30s 是响应性 vs HID link 稳定性的折中.
-    private static let reportingRefreshMinInterval: TimeInterval = 30
+    /// 用户的预期场景 (打开面板 / 切分页 / App 激活) 在 10s 内几乎不会产生新的冲突变化,
+    /// 取 10s 是响应性 vs HID link 稳定性的折中.
+    private static let reportingRefreshMinInterval: TimeInterval = 10
 
     private var lastReportingRefresh: Date?
 
@@ -152,12 +187,24 @@ class LogitechHIDManager {
     /// UI 触发点可随意调用,manager 内部按 `reportingRefreshMinInterval` 防抖.
     /// 同步返回,不阻塞 UI — 实际 HID++ 请求在各自 session 的 input-report 回调里异步处理,
     /// 完成后通过 `reportingQueryDidCompleteNotification` 刷新 indicator.
+    /// 优化: 没有任何 Logi 绑定时没人会看到冲突图标,直接跳过以省去无谓的 HID++ 往返
+    /// (对没 Logi 鼠标的用户自动生效, 因为此时 sessions 也必然为空).
     func refreshReportingStatesIfNeeded() {
+        guard hasAnyLogitechBinding else { return }
         if let last = lastReportingRefresh,
            Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
         lastReportingRefresh = Date()
         for session in sessions.values where session.isHIDPPCandidate {
             session.refreshReportingState()
+        }
+    }
+
+    /// 判断 Options.buttons.binding 中是否存在至少一个 Logi 按键触发器.
+    /// 检测 UI 仅在这种情况下有展示价值, 作为 refresh 的 gate.
+    private var hasAnyLogitechBinding: Bool {
+        return Options.shared.buttons.binding.contains { binding in
+            binding.triggerEvent.type == .mouse &&
+                LogitechCIDRegistry.isLogitechCode(binding.triggerEvent.code)
         }
     }
 

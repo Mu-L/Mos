@@ -9998,6 +9998,84 @@
           }
         }
       }
+    },
+    "button_activity_phase_discovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : { "state" : "translated", "value" : "Initializing device" }
+        },
+        "ja" : {
+          "stringUnit" : { "state" : "translated", "value" : "デバイスを初期化中" }
+        },
+        "ko" : {
+          "stringUnit" : { "state" : "translated", "value" : "장치 초기화 중" }
+        },
+        "zh-Hans" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在初始化设备" }
+        },
+        "zh-Hant" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在初始化裝置" }
+        },
+        "zh-Hant-HK" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在初始化裝置" }
+        },
+        "zh-Hant-TW" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在初始化裝置" }
+        }
+      }
+    },
+    "button_activity_phase_reporting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : { "state" : "translated", "value" : "Refreshing button state" }
+        },
+        "ja" : {
+          "stringUnit" : { "state" : "translated", "value" : "ボタン状態を更新中" }
+        },
+        "ko" : {
+          "stringUnit" : { "state" : "translated", "value" : "버튼 상태 새로고침 중" }
+        },
+        "zh-Hans" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在刷新按键状态" }
+        },
+        "zh-Hant" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在刷新按鍵狀態" }
+        },
+        "zh-Hant-HK" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在刷新按鍵狀態" }
+        },
+        "zh-Hant-TW" : {
+          "stringUnit" : { "state" : "translated", "value" : "正在刷新按鍵狀態" }
+        }
+      }
+    },
+    "button_activity_popover_fallback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : { "state" : "translated", "value" : "Finishing up…" }
+        },
+        "ja" : {
+          "stringUnit" : { "state" : "translated", "value" : "まもなく完了…" }
+        },
+        "ko" : {
+          "stringUnit" : { "state" : "translated", "value" : "마무리 중…" }
+        },
+        "zh-Hans" : {
+          "stringUnit" : { "state" : "translated", "value" : "即将完成…" }
+        },
+        "zh-Hant" : {
+          "stringUnit" : { "state" : "translated", "value" : "即將完成…" }
+        },
+        "zh-Hant-HK" : {
+          "stringUnit" : { "state" : "translated", "value" : "即將完成…" }
+        },
+        "zh-Hant-TW" : {
+          "stringUnit" : { "state" : "translated", "value" : "即將完成…" }
+        }
+      }
     }
   },
   "version" : "1.1"

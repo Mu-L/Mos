@@ -309,6 +309,9 @@ class LogitechDeviceSession {
         divertedCIDs.removeAll()
         lastActiveCIDs.removeAll()
         discoveredControls.removeAll()
+        // timer 已清零, 此时 isActivityInProgress 只剩 discoveryInFlight 一个分量;
+        // 走 setter 让 Manager 重算聚合 busy, 防止 session 销毁后 UI spinner 卡住.
+        setDiscoveryInFlight(false)
     }
 
     // MARK: - Input Report Callback
@@ -402,6 +405,36 @@ class LogitechDeviceSession {
         guard discoveryInFlight != flag else { return }
         discoveryInFlight = flag
         NotificationCenter.default.post(name: LogitechHIDManager.discoveryStateDidChangeNotification, object: nil)
+        LogitechHIDManager.shared.recomputeAndNotifyActivityState()
+    }
+
+    /// 任一阶段 (discovery / reporting query) 正在进行; UI 据此驱动 activity spinner.
+    var isActivityInProgress: Bool {
+        return discoveryInFlight || reportingQueryTimer != nil
+    }
+
+    /// 供 UI hover popover 读取的 session 级活动快照. 无活动时返回 nil.
+    /// 只读投影, 不改变任何内部状态; 读线程与 HID++ 回调一致 (main).
+    var activityStatus: SessionActivityStatus? {
+        // reporting query 比 discovery 后发生, 信息更细 (可给出进度), 优先展示.
+        if reportingQueryTimer != nil {
+            let total = discoveredControls.count
+            // reportingQueryIndex 是下一个待发的索引; 展示用 index+1 更贴近"正在查第几个"
+            let current = min(reportingQueryIndex + 1, max(total, 1))
+            return SessionActivityStatus(
+                phase: .reportingQuery,
+                deviceName: deviceInfo.name,
+                progress: total > 0 ? (current, total) : nil
+            )
+        }
+        if discoveryInFlight {
+            return SessionActivityStatus(
+                phase: .discovery,
+                deviceName: deviceInfo.name,
+                progress: nil
+            )
+        }
+        return nil
     }
 
     private func discoverFeature(featureId: UInt16, completion: @escaping (UInt8?) -> Void) {
@@ -1500,6 +1533,8 @@ class LogitechDeviceSession {
         }
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Querying reporting state for \(discoveredControls.count) controls...")
         sendGetControlReporting(featureIndex: idx, controlIndex: 0)
+        // timer 刚被创建, 通知 Manager 汇总 activity 状态 (幂等, 无变化时不 post)
+        LogitechHIDManager.shared.recomputeAndNotifyActivityState()
     }
 
     private func sendGetControlReporting(featureIndex: UInt8, controlIndex: Int) {
@@ -1533,6 +1568,8 @@ class LogitechDeviceSession {
             // 先让 divertBoundControls 置 reprogInitComplete=true / handshakeComplete=true, 再通知
             // 观察者, 避免 main-queue observer 在状态翻转前就读到 stale 值.
             NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
+            // reportingQueryTimer 此时已 nil, 若 discoveryInFlight 也为 false 则 activity 真正结束.
+            LogitechHIDManager.shared.recomputeAndNotifyActivityState()
         }
     }
 
