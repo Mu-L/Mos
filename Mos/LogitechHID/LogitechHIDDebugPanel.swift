@@ -214,6 +214,9 @@ class LogitechHIDDebugPanel: NSObject {
 
     private var currentSession: LogitechDeviceSession?
     private var logTypeFilter: Set<LogEntryType> = Set(LogEntryType.allCases)
+    /// 记录上次已渲染的 filteredLog 行数, 用于 logNotification 走增量 insertRows 而非整表 reload.
+    /// 断点条件 (过滤变化 / 清空 / buffer 到达 maxLogLines 触发前置裁剪) 时回落 reloadData.
+    private var lastFilteredLogCount: Int = 0
     static var logBuffer: [LogEntry] = []
     static let maxLogLines = 500
     private var logObserver: NSObjectProtocol?
@@ -1083,6 +1086,7 @@ class LogitechHIDDebugPanel: NSObject {
 
     @objc private func clearLogClicked() {
         LogitechHIDDebugPanel.logBuffer.removeAll()
+        lastFilteredLogCount = 0
         logTableView?.reloadData()
     }
 
@@ -1163,6 +1167,7 @@ class LogitechHIDDebugPanel: NSObject {
             logTypeFilter.insert(type)
             sender.layer?.opacity = 1.0
         }
+        lastFilteredLogCount = filteredLogEntries().count
         logTableView?.reloadData()
     }
 
@@ -1396,10 +1401,21 @@ class LogitechHIDDebugPanel: NSObject {
             : String(format: "%@ (0x%04X)", nameSegment, dev.wirelessPID)
     }
 
+    /// Receiver 的 device 标头被选中时, features/controls 语义上属于被 target 的某个 slot,
+    /// 不应挂在 receiver 名下显示. 用 sidebar 当前选择来判断, 保证所有刷新入口
+    /// (click / sessionChanged / reportingQueryDidComplete 等) 一致清空, 避免残留上轮 slot 数据.
+    private func isReceiverHeaderSelected() -> Bool {
+        guard let s = currentSession, s.connectionMode == .receiver else { return false }
+        if case .device? = currentSidebarSelection() { return true }
+        return false
+    }
+
     private func refreshFeatureTable() {
-        guard let s = currentSession else {
+        guard let s = currentSession, !isReceiverHeaderSelected() else {
             featureRows.removeAll()
             featureTableView?.reloadData()
+            featuresHeaderBase = "FEATURES (0)"
+            renderRightPanelHeaders()
             return
         }
         featureRows = s.debugFeatureIndex.sorted(by: { $0.value < $1.value }).map { (featureId, index) in
@@ -1413,9 +1429,11 @@ class LogitechHIDDebugPanel: NSObject {
     }
 
     private func refreshControls() {
-        guard let s = currentSession else {
+        guard let s = currentSession, !isReceiverHeaderSelected() else {
             controlRows.removeAll()
             controlsTableView?.reloadData()
+            controlsHeaderBase = "CONTROLS (0)"
+            renderRightPanelHeaders()
             return
         }
         controlRows = s.debugDiscoveredControls
@@ -1446,24 +1464,36 @@ class LogitechHIDDebugPanel: NSObject {
 
     private func startObserving() {
         stopObserving()
+        lastFilteredLogCount = filteredLogEntries().count
         logObserver = NotificationCenter.default.addObserver(
             forName: LogitechHIDDebugPanel.logNotification, object: nil, queue: .main
         ) { [weak self] notification in
-            guard let self = self else { return }
-            self.logTableView?.reloadData()
+            guard let self = self, let table = self.logTableView else { return }
+            // 增量更新: 单条追加走 insertRows (O(1) 视图工作); 过滤掉的条目静默跳过;
+            // 其它异常 (buffer 前置裁剪导致行数倒退) 回落 reloadData.
+            let newCount = self.filteredLogEntries().count
+            let previousCount = self.lastFilteredLogCount
+            if newCount == previousCount + 1 {
+                table.insertRows(at: IndexSet(integer: newCount - 1), withAnimation: [])
+            } else if newCount != previousCount {
+                table.reloadData()
+            }
+            self.lastFilteredLogCount = newCount
             // Auto-scroll only if user is near the bottom
-            if let sv = self.logTableView?.enclosingScrollView {
+            if let sv = table.enclosingScrollView {
                 let visibleH = sv.contentView.bounds.height
-                let contentH = self.logTableView?.frame.height ?? 0
+                let contentH = table.frame.height
                 let scrollY = sv.contentView.bounds.origin.y
                 let isNearBottom = (contentH - scrollY - visibleH) < 40
-                if isNearBottom {
-                    let count = self.filteredLogEntries().count
-                    if count > 0 { self.logTableView?.scrollRowToVisible(count - 1) }
+                if isNearBottom && newCount > 0 {
+                    table.scrollRowToVisible(newCount - 1)
                 }
             }
+            // 只匹配 setControlReporting 的 "... divert=ON/OFF" 明确 toggle 日志.
+            // 排除 RX flags 里的 "tmpDivert/persistDivert" 等被动描述 —— 那类状态变化由
+            // reportingQueryDidCompleteNotification 在 discovery 结束时统一 refresh.
             if let entry = notification.object as? LogEntry,
-               entry.type == .buttonEvent || entry.message.contains("divert") {
+               entry.type == .buttonEvent || entry.message.contains(" divert=") {
                 self.refreshControls()
             }
         }
