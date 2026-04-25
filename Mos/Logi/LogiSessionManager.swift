@@ -13,8 +13,12 @@ import IOKit.hid
 /// Cycle direction for DPI / SmartShift toggle helpers.
 public enum Direction { case up, down }
 
-class LogiSessionManager {
-    static let shared = LogiSessionManager()
+/// Internal manager that orchestrates Logi HID device sessions. The only
+/// supported public surface is `LogiCenter` (Step 5's lint script enforces
+/// this against the rest of the app). Tests in `MosTests/Logi*Tests.swift`
+/// reference internal Logi symbols by design.
+internal class LogiSessionManager {
+    internal static let shared = LogiSessionManager()
     init() { NSLog("Module initialized: LogiSessionManager") }
 
     // MARK: - Constants
