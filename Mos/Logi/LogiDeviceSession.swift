@@ -1666,59 +1666,6 @@ class LogiDeviceSession {
         LogiDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")
     }
 
-    /// 同步 divert 状态: 只触碰 "已绑定的按键" 与 "本进程曾 divert 但已不再绑定的按键",
-    /// 其它 CID (包括 Options+ 可能 divert 的) 一律不碰.
-    func syncDivertWithBindings() {
-        guard let idx = featureIndex[Self.featureReprogV4] else { return }
-
-        let boundCodes = collectBoundLogiMosCodes()
-        let divertableCIDs = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
-        let plan = LogiDivertPlanner.plan(
-            boundMosCodes: boundCodes,
-            alreadyDiverted: divertedCIDs,
-            divertableCIDs: divertableCIDs
-        )
-
-        for cid in plan.toDivert {
-            setControlReporting(featureIndex: idx, cid: cid, divert: true)
-        }
-        for cid in plan.toUndivert {
-            setControlReporting(featureIndex: idx, cid: cid, divert: false)
-        }
-
-        LogiDebugPanel.log("[\(deviceInfo.name)] Sync divert: +\(plan.toDivert.count) -\(plan.toUndivert.count), now \(divertedCIDs.count) diverted (bound=\(boundCodes.count))")
-    }
-
-    /// 汇总当前所有可能触发 Logi 按键的 MosCode (按键面板 + 滚动面板 + 分应用)
-    private func collectBoundLogiMosCodes() -> Set<UInt16> {
-        var boundCodes = Set<UInt16>()
-
-        // 1. 按键面板: 全局按钮绑定
-        for binding in ButtonUtils.shared.getButtonBindings() where binding.isEnabled && binding.triggerEvent.type == .mouse {
-            boundCodes.insert(binding.triggerEvent.code)
-        }
-
-        // 2. 滚动面板: 全局滚动热键 (dash/toggle/block)
-        for hotkey in [Options.shared.scroll.dash, Options.shared.scroll.toggle, Options.shared.scroll.block] {
-            if let h = hotkey, h.type == .mouse, LogiCIDDirectory.isLogitechCode(h.code) {
-                boundCodes.insert(h.code)
-            }
-        }
-
-        // 3. 应用程序面板: 分应用滚动热键 (非继承的应用)
-        let apps = Options.shared.application.applications
-        for i in 0..<apps.count {
-            guard let app = apps.get(by: i), !app.inherit else { continue }
-            for hotkey in [app.scroll.dash, app.scroll.toggle, app.scroll.block] {
-                if let h = hotkey, h.type == .mouse, LogiCIDDirectory.isLogitechCode(h.code) {
-                    boundCodes.insert(h.code)
-                }
-            }
-        }
-
-        return boundCodes
-    }
-
     /// 录制模式: 临时 divert 所有 divertable 按键
     func temporarilyDivertAll() {
         guard let idx = featureIndex[Self.featureReprogV4] else { return }

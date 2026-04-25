@@ -238,13 +238,6 @@ internal class LogiSessionManager {
 
     // MARK: - Divert Control
 
-    /// 绑定变更后调用: 同步所有会话的 divert 状态
-    func syncDivertWithBindings() {
-        for (_, session) in sessions where session.isHIDPPCandidate {
-            session.syncDivertWithBindings()
-        }
-    }
-
     /// 录制模式标志: 录制期间跳过动作执行, 只转发事件给 KeyRecorder
     private(set) var isRecording = false
 
