@@ -75,7 +75,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         setupKeyDisplayView(with: binding.triggerEvent)
 
         // 判断是否为 Logi 按键 (code >= 1000)
-        let isLogiTrigger = binding.triggerEvent.type == .mouse && LogiCIDDirectory.isLogitechCode(binding.triggerEvent.code)
+        let isLogiTrigger = binding.triggerEvent.type == .mouse && LogiCenter.shared.isLogiCode(binding.triggerEvent.code)
 
         // 配置动作选择器
         setupActionPopUpButton(currentShortcut: binding.systemShortcut, showLogiActions: isLogiTrigger)
@@ -216,12 +216,12 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         conflictTrackingArea = nil
 
         // 非 Logi 按键 -> 不显示
-        guard currentTriggerCode > 0, LogiCIDDirectory.isLogitechCode(currentTriggerCode) else {
+        guard currentTriggerCode > 0, LogiCenter.shared.isLogiCode(currentTriggerCode) else {
             setupDashedLine()
             return
         }
 
-        let status = LogiSessionManager.shared.conflictStatus(forMosCode: currentTriggerCode)
+        let status = LogiCenter.shared.conflictStatus(forMosCode: currentTriggerCode)
         guard status == .conflict else {
             setupDashedLine()
             return
@@ -360,14 +360,14 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         unregisterConflictObservers()
         let center = NotificationCenter.default
         let sessionToken = center.addObserver(
-            forName: LogiSessionManager.sessionChangedNotification,
+            forName: LogiCenter.sessionChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.refreshConflictIndicator()
         }
         let reportingToken = center.addObserver(
-            forName: LogiSessionManager.reportingQueryDidCompleteNotification,
+            forName: LogiCenter.reportingDidComplete,
             object: nil,
             queue: .main
         ) { [weak self] _ in

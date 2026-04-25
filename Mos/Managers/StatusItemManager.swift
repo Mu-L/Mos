@@ -104,7 +104,7 @@ extension StatusItemManager {
         WindowManager.shared.showWindow(withIdentifier: WINDOW_IDENTIFIER.monitorWindowController)
     }
     @objc func hidDebugClick() {
-        LogiDebugPanel.shared.show()
+        LogiCenter.shared.showDebugPanel()
     }
     @objc func toastDebugClick() {
         Toast.showTestPanel()
