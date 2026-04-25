@@ -339,14 +339,9 @@ class LogiDeviceSession {
                 setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
             }
         }
-        // 清理 ScrollCore 的 HID 热键状态, 防止设备断连时按键卡住
-        // (设备断连后 key-up 永不会触发, 滚动热键状态会永久卡死)
-        for cid in lastActiveCIDs {
-            let mosCode = LogiCIDDirectory.toMosCode(cid)
-            ScrollCore.shared.handleScrollHotkey(code: mosCode, isDown: false)
-        }
+        // 清理 bridge 的滚动热键状态 (设备断连后 key-up 永不会触发).
+        emitScrollHotkeyReleaseForActiveCIDs()
         divertedCIDs.removeAll()
-        lastActiveCIDs.removeAll()
         discoveredControls.removeAll()
         // timer 已清零, 此时 isActivityInProgress 只剩 discoveryInFlight 一个分量;
         // 走 setter 让 Manager 重算聚合 busy, 防止 session 销毁后 UI spinner 卡住.
@@ -561,9 +556,8 @@ class LogiDeviceSession {
         reprogControlCount = 0
         reprogQueryIndex = 0
         reportingQueryIndex = 0
+        emitScrollHotkeyReleaseForActiveCIDs()
         divertedCIDs.removeAll()
-        lastApplied.removeAll()
-        lastActiveCIDs.removeAll()
         LogiDebugPanel.log("[\(deviceInfo.name)] Re-discovering features...")
         setDiscoveryInFlight(true)
         // 复用 startFreshDiscovery 的完整握手流程: 成功走 sendGetControlCount,
@@ -623,9 +617,8 @@ class LogiDeviceSession {
         reprogControlCount = 0
         reprogQueryIndex = 0
         reportingQueryIndex = 0
+        emitScrollHotkeyReleaseForActiveCIDs()
         divertedCIDs.removeAll()
-        self.lastApplied = []
-        lastActiveCIDs.removeAll()
         setDiscoveryInFlight(true)
         LogiDebugPanel.log("[\(deviceInfo.name)] Target slot changed to \(slot)")
     }
@@ -1711,9 +1704,23 @@ class LogiDeviceSession {
 
     // MARK: - Event Dispatch
 
+    /// Emit synthetic .up scroll-hotkey events for any CIDs the device left
+    /// "pressed" before a teardown / slot change / rediscovery, then clear the
+    /// per-session activity caches. Without this, ScrollCore's internal hotkey
+    /// state could stay latched on a key that will never receive a real release.
+    private func emitScrollHotkeyReleaseForActiveCIDs() {
+        let bridge = LogiCenter.shared.externalBridge
+        for cid in lastActiveCIDs {
+            let mosCode = LogiCIDDirectory.toMosCode(cid)
+            bridge.handleLogiScrollHotkey(code: mosCode, phase: .up)
+        }
+        lastActiveCIDs.removeAll()
+        self.lastApplied.removeAll()
+    }
+
     private func dispatchButtonEvent(cid: UInt16, isDown: Bool) {
         let currentFlags = CGEventSource.flagsState(.combinedSessionState)
-        let mosEvent = InputEvent(
+        let event = InputEvent(
             type: .mouse,
             code: LogiCIDDirectory.toMosCode(cid),
             modifiers: currentFlags,
@@ -1722,45 +1729,34 @@ class LogiDeviceSession {
             device: deviceInfo
         )
 
-        // 录制模式: 不执行动作, 只转发给 KeyRecorder
-        if LogiSessionManager.shared.isRecording {
-            NotificationCenter.default.post(
-                name: LogiSessionManager.buttonEventNotification,
-                object: nil,
-                userInfo: ["event": mosEvent]
-            )
+        // Always-fired raw event (deterministic for wizard + debug observers)
+        NotificationCenter.default.post(
+            name: LogiCenter.rawButtonEvent,
+            object: nil,
+            userInfo: [
+                "event": event,
+                "mosCode": event.code,
+                "cid": cid,
+                "phase": isDown ? "down" : "up",
+            ])
+
+        let bridge = LogiCenter.shared.externalBridge
+
+        if LogiCenter.shared.isRecording {
+            _ = bridge.dispatchLogiButtonEvent(event)
             return
         }
 
-        // 匹配滚动热键 (dash/toggle/block)
-        // HID++ 事件不经过 CGEventTap, 需要在此处单独处理
-        // 注意: 不做 early return, 允许同一按键同时触发滚动热键和按钮绑定
-        ScrollCore.shared.handleScrollHotkey(
-            code: mosEvent.code, isDown: isDown
-        )
+        // Side path: scroll hotkey fires regardless of binding outcome.
+        bridge.handleLogiScrollHotkey(code: event.code, phase: event.phase)
 
-        // 匹配 binding: logi* 动作在当前 session 执行 (设备隔离, 仅 down)
-        // 其余一律走 InputProcessor (支持 down/up 和 custom 绑定)
-        if isDown {
-            if let binding = ButtonUtils.shared.getBestMatchingBinding(
-                for: mosEvent,
-                where: { $0.systemShortcutName.hasPrefix("logi") }
-            ) {
-                // Logi 动作: 在当前 session 执行 (设备隔离, 不注册 activeBindings)
-                executeLogiAction(binding.systemShortcutName)
-                return
-            }
+        // Main routing.
+        switch bridge.dispatchLogiButtonEvent(event) {
+        case .logiAction(let name) where event.phase == .down:
+            executeLogiAction(name)
+        case .consumed, .unhandled, .logiAction:
+            break
         }
-        // 非 logi 绑定 (含 custom::) 和所有 Up 事件: 统一走 InputProcessor
-        let result = InputProcessor.shared.process(mosEvent)
-        if result == .consumed { return }
-
-        // 通知 KeyRecorder
-        NotificationCenter.default.post(
-            name: LogiSessionManager.buttonEventNotification,
-            object: nil,
-            userInfo: ["event": mosEvent]
-        )
     }
 
     /// 在当前 session 上执行 Logi 动作
