@@ -79,10 +79,10 @@ struct ActionDisplayResolver {
         }
 
         let brand = BrandTag.brandForCode(code)
-        if let brand, modifiers == 0, LogitechCIDRegistry.isLogitechCode(code) {
+        if let brand, modifiers == 0, LogiCIDDirectory.isLogitechCode(code) {
             return ActionPresentation(
                 kind: .namedAction,
-                title: LogitechCIDRegistry.name(forMosCode: code),
+                title: LogiCIDDirectory.name(forMosCode: code),
                 symbolName: nil,
                 badgeComponents: [],
                 brand: brand

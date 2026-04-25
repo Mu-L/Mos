@@ -70,7 +70,7 @@ class PreferencesButtonsViewController: NSViewController {
         // 设置录制按钮回调
         setupRecordButtonCallback()
         // 触发一次冲突状态刷新 (30s 内最多跑一次,异步)
-        LogitechHIDManager.shared.refreshReportingStatesIfNeeded()
+        LogiSessionManager.shared.refreshReportingStatesIfNeeded()
         // 面板出现时同步一次当前 busy 状态, 避免错过此前发出的通知
         syncActivityIndicatorWithManager()
     }
@@ -119,7 +119,7 @@ extension PreferencesButtonsViewController {
         Options.shared.buttons.binding = buttonBindings
         ButtonUtils.shared.invalidateCache()
         // 绑定变更后同步 HID++ divert: 只 divert 有绑定的按键
-        LogitechHIDManager.shared.syncDivertWithBindings()
+        LogiSessionManager.shared.syncDivertWithBindings()
     }
 
     // 更新删除按钮状态
@@ -299,7 +299,7 @@ extension PreferencesButtonsViewController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleActivityStateChanged(_:)),
-            name: LogitechHIDManager.activityStateDidChangeNotification,
+            name: LogiSessionManager.activityStateDidChangeNotification,
             object: nil
         )
     }
@@ -335,7 +335,7 @@ extension PreferencesButtonsViewController {
     /// 把当前 Manager.isBusy 映射到 spinner 的可见性, 带 500ms 最短显示;
     /// 同时把 busy=false 同步到 popover (若正在展示, 立即关闭).
     fileprivate func syncActivityIndicatorWithManager() {
-        let busy = LogitechHIDManager.shared.isBusy
+        let busy = LogiSessionManager.shared.isBusy
         if busy {
             pendingActivityStopWorkItem?.cancel()
             pendingActivityStopWorkItem = nil
@@ -381,7 +381,7 @@ extension PreferencesButtonsViewController {
             return
         }
         // 不忙时不弹 (即便 tracking area 理论上已 hidden 了也兜一层)
-        guard LogitechHIDManager.shared.isBusy else { return }
+        guard LogiSessionManager.shared.isBusy else { return }
         showActivityPopover()
     }
 
@@ -428,7 +428,7 @@ extension PreferencesButtonsViewController {
     /// 尺寸自适应完全由 AdaptivePopover (content VC 的父类) 负责, 本方法只推文案.
     private func refreshActivityPopoverContent() {
         guard let content = activityPopoverContent else { return }
-        let summary = LogitechHIDManager.shared.currentActivitySummary
+        let summary = LogiSessionManager.shared.currentActivitySummary
         content.setMessage(Self.formatActivitySummary(summary))
     }
 

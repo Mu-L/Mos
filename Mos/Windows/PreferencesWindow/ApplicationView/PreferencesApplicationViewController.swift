@@ -86,7 +86,7 @@ class PreferencesApplicationViewController: NSViewController {
         // 删除
         Options.shared.application.applications.remove(at: tableView.selectedRow)
         // 同步 Logi 按键 divert 状态 (被删应用可能有独立的 Logi 滚动热键绑定)
-        LogitechHIDManager.shared.syncDivertWithBindings()
+        LogiSessionManager.shared.syncDivertWithBindings()
         // 重新加载
         tableView.reloadData()
         // 立即更新空状态显示

@@ -10,12 +10,12 @@ final class LogiPersistenceCanaryTests: XCTestCase {
     ]
 
     func testFeatureCacheKey_unchanged() {
-        XCTAssertEqual(LogitechDeviceSession.featureCacheKeyForTests, "logitechFeatureCache",
+        XCTAssertEqual(LogiDeviceSession.featureCacheKeyForTests, "logitechFeatureCache",
                        "UserDefaults key 'logitechFeatureCache' MUST NOT change — would invalidate user feature cache on upgrade.")
     }
 
     func testAutosaveNames_match_golden() {
-        let production = LogitechHIDDebugPanel.autosaveNamesSnapshotForTests.sorted()
+        let production = LogiDebugPanel.autosaveNamesSnapshotForTests.sorted()
         let golden = Self.frozenAutosaveNames.sorted()
         XCTAssertEqual(production, golden,
                        "Debug panel autosave names drifted from frozen golden list. If intentional, update LogiPersistenceCanaryTests.frozenAutosaveNames.")
