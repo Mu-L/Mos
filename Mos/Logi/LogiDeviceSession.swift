@@ -193,12 +193,31 @@ class LogiDeviceSession {
         return usagePage == 0x0001 && usage == 0x0002
     }
 
+    /// CID set last passed to setControlReporting. Diffed against next applyUsage's
+    /// projection so we only emit setControlReporting for state changes.
     internal var lastApplied: Set<UInt16> = []
 
     internal func applyUsage(_ aggregateMosCodes: Set<UInt16>) {
-        // Step 3 Task 3.4 implements MosCode -> CID projection and IO.
-        // Stub for compilation in this task.
-        self.lastApplied = aggregateMosCodes
+        #if DEBUG
+        precondition(Thread.isMainThread, "applyUsage main-thread-only")
+        #endif
+        guard let reprogIdx = featureIndex[Self.featureReprogV4] else { return }
+        // Project MosCodes -> CIDs, drop unmapped, intersect with divertable CIDs.
+        let divertable = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
+        let targetCIDs: Set<UInt16> = aggregateMosCodes.reduce(into: Set<UInt16>()) { acc, code in
+            if let cid = LogiCIDDirectory.toCID(code), divertable.contains(cid) {
+                acc.insert(cid)
+            }
+        }
+        let toDivert = targetCIDs.subtracting(self.lastApplied)
+        let toUndivert = self.lastApplied.subtracting(targetCIDs)
+        for cid in toDivert {
+            setControlReporting(featureIndex: reprogIdx, cid: cid, divert: true)
+        }
+        for cid in toUndivert {
+            setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
+        }
+        self.lastApplied = targetCIDs
     }
 
     // MARK: - Debug Accessors (for HID++ debug panel)
