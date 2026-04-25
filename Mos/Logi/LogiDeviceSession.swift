@@ -197,6 +197,10 @@ class LogiDeviceSession {
     /// projection so we only emit setControlReporting for state changes.
     internal var lastApplied: Set<UInt16> = []
 
+    private func primeFromRegistry() {
+        LogiCenter.shared.registry.primeSession(self)
+    }
+
     internal func applyUsage(_ aggregateMosCodes: Set<UInt16>) {
         #if DEBUG
         precondition(Thread.isMainThread, "applyUsage main-thread-only")
@@ -554,6 +558,7 @@ class LogiDeviceSession {
         reprogQueryIndex = 0
         reportingQueryIndex = 0
         divertedCIDs.removeAll()
+        lastApplied.removeAll()
         lastActiveCIDs.removeAll()
         LogiDebugPanel.log("[\(deviceInfo.name)] Re-discovering features...")
         setDiscoveryInFlight(true)
@@ -578,7 +583,9 @@ class LogiDeviceSession {
     func redivertAllControls() {
         lastActiveCIDs.removeAll()
         reprogInitComplete = true
-        syncDivertWithBindings()
+        divertedCIDs.removeAll()
+        lastApplied.removeAll()
+        primeFromRegistry()
         LogiDebugPanel.log("[\(deviceInfo.name)] Re-synced divert with bindings")
     }
 
@@ -613,6 +620,7 @@ class LogiDeviceSession {
         reprogQueryIndex = 0
         reportingQueryIndex = 0
         divertedCIDs.removeAll()
+        self.lastApplied = []
         lastActiveCIDs.removeAll()
         setDiscoveryInFlight(true)
         LogiDebugPanel.log("[\(deviceInfo.name)] Target slot changed to \(slot)")
@@ -1650,7 +1658,7 @@ class LogiDeviceSession {
         handshakeComplete = true
         setDiscoveryInFlight(false)
         lastActiveCIDs.removeAll()
-        syncDivertWithBindings()
+        primeFromRegistry()
         LogiDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")
     }
 
@@ -1719,7 +1727,7 @@ class LogiDeviceSession {
 
     /// 录制结束: 恢复到只 divert 有绑定的状态
     func restoreDivertToBindings() {
-        syncDivertWithBindings()
+        primeFromRegistry()
     }
 
     private func handleDivertedButtonEvent(_ report: UnsafeBufferPointer<UInt8>) {
