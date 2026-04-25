@@ -77,7 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     // 运行后启动滚动处理
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        LogiCenter.shared.installBridge(LogiNoOpBridge.shared)
+        LogiCenter.shared.installBridge(LogiIntegrationBridge.shared)
         LogiUsageBootstrap.refreshAll()
         startWithAccessibilityPermissionsChecker(nil)
         UpdateManager.shared.scheduleCheckOnAppStartIfNeeded()

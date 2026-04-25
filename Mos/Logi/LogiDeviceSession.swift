@@ -1232,7 +1232,7 @@ class LogiDeviceSession {
         let message = String(format: NSLocalizedString("featureNotAvailable", comment: ""),
                             deviceInfo.name, featureName)
         LogiDebugPanel.log("[\(deviceInfo.name)] \(featureName): feature not available")
-        Toast.show(message, style: .warning)
+        LogiCenter.shared.externalBridge.showLogiToast(message, severity: .warning)
     }
 
     // MARK: - Report Parsing
