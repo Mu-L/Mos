@@ -13,19 +13,26 @@ final class LogiCenter {
     // MARK: - Internal collaborators (Step 2: facade only delegates to manager;
     //                                  Step 3: registry added; Step 4: bridge filled in)
     private let manager: LogiSessionManager
+    internal let registry: UsageRegistry
     internal private(set) var externalBridge: LogiExternalBridge
 
     // MARK: - Production init
     private init() {
         self.manager = LogiSessionManager.shared
+        let mgr = self.manager  // capture for closure
+        self.registry = UsageRegistry(sessionProvider: { [weak mgr] in
+            return mgr?.activeSessions ?? []
+        })
         self.externalBridge = LogiNoOpBridge.shared
     }
 
     // MARK: - Test-injectable init (Tier 2 harness)
     #if DEBUG
     internal init(manager: LogiSessionManager,
+                  registry: UsageRegistry,
                   bridge: LogiExternalBridge = LogiNoOpBridge.shared) {
         self.manager = manager
+        self.registry = registry
         self.externalBridge = bridge
     }
     #endif
@@ -87,6 +94,14 @@ final class LogiCenter {
     // MARK: - Activity
     var isBusy: Bool { manager.isBusy }
     var currentActivitySummary: [SessionActivityStatus] { manager.currentActivitySummary }
+
+    // MARK: - Usage registry
+    func setUsage(source: UsageSource, codes: Set<UInt16>) {
+        registry.setUsage(source: source, codes: codes)
+    }
+    func usages(of code: UInt16) -> [UsageSource] {
+        return registry.usages(of: code)
+    }
 
     // MARK: - Snapshots
     func activeSessionsSnapshot() -> [LogiDeviceSessionSnapshot] {
