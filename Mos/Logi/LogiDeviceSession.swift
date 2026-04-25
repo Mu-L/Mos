@@ -308,7 +308,7 @@ class LogiDeviceSession {
         // (设备断连后 key-up 永不会触发, 滚动热键状态会永久卡死)
         for cid in lastActiveCIDs {
             let mosCode = LogiCIDDirectory.toMosCode(cid)
-            ScrollCore.shared.handleScrollHotkeyFromHIDPlusPlus(code: mosCode, isDown: false)
+            ScrollCore.shared.handleScrollHotkey(code: mosCode, isDown: false)
         }
         divertedCIDs.removeAll()
         lastActiveCIDs.removeAll()
@@ -1745,7 +1745,7 @@ class LogiDeviceSession {
         // 匹配滚动热键 (dash/toggle/block)
         // HID++ 事件不经过 CGEventTap, 需要在此处单独处理
         // 注意: 不做 early return, 允许同一按键同时触发滚动热键和按钮绑定
-        ScrollCore.shared.handleScrollHotkeyFromHIDPlusPlus(
+        ScrollCore.shared.handleScrollHotkey(
             code: mosEvent.code, isDown: isDown
         )
 
