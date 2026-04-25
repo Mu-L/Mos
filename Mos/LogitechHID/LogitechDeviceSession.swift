@@ -381,6 +381,8 @@ class LogitechDeviceSession {
                 LogitechHIDDebugPanel.log("\(tag) REPROG_CONTROLS_V4 not available")
                 // Discovery 走到终点但未命中 REPROG, 仍算握手完成 (Mos 能做的已经做完).
                 self.markHandshakeComplete()
+                NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
+                LogitechHIDManager.shared.recomputeAndNotifyActivityState()
                 return
             }
             self.featureIndex[Self.featureReprogV4] = index
@@ -1489,6 +1491,8 @@ class LogitechDeviceSession {
         } else {
             // 设备声明 0 个可编程控件: discovery 走到终点, 记为握手完成.
             markHandshakeComplete()
+            NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
+            LogitechHIDManager.shared.recomputeAndNotifyActivityState()
         }
     }
 
