@@ -999,8 +999,8 @@ class LogiDeviceSession {
     // MARK: - Logi Action Execution
 
     private var pendingSmartShiftToggle: UInt8? = nil
-    private var pendingDPICycle: (featureIndex: UInt8, direction: LogiSessionManager.DPICycleDirection)? = nil
-    private var pendingDPIListQuery: (featureIndex: UInt8, direction: LogiSessionManager.DPICycleDirection)? = nil
+    private var pendingDPICycle: (featureIndex: UInt8, direction: Direction)? = nil
+    private var pendingDPIListQuery: (featureIndex: UInt8, direction: Direction)? = nil
     private var currentDPI: UInt16 = 0
     private var dpiSteps: [UInt16] = []  // 从设备查询, 不硬编码
     private var dpiStepSize: UInt16 = 0  // 设备报告的 DPI 步进值
@@ -1038,7 +1038,7 @@ class LogiDeviceSession {
     }
 
     /// DPI 循环
-    func executeDPICycle(direction: LogiSessionManager.DPICycleDirection) {
+    func executeDPICycle(direction: Direction) {
         // AdjustableDPI feature ID = 0x2201
         let dpiFeatureId: UInt16 = 0x2201
         if let idx = featureIndex[dpiFeatureId] {
@@ -1055,7 +1055,7 @@ class LogiDeviceSession {
         }
     }
 
-    private func cycleDPI(featureIndex: UInt8, direction: LogiSessionManager.DPICycleDirection) {
+    private func cycleDPI(featureIndex: UInt8, direction: Direction) {
         if dpiSteps.isEmpty {
             // 先查询设备支持的 DPI 列表
             // getSensorDpiList: function 1, param sensorIdx=0

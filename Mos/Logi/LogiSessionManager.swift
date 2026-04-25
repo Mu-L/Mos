@@ -10,6 +10,9 @@ import Foundation
 import IOKit
 import IOKit.hid
 
+/// Cycle direction for DPI / SmartShift toggle helpers.
+public enum Direction { case up, down }
+
 class LogiSessionManager {
     static let shared = LogiSessionManager()
     init() { NSLog("Module initialized: LogiSessionManager") }
@@ -147,6 +150,10 @@ class LogiSessionManager {
     /// 聚合后只在 "全局是否忙碌" 翻转的瞬间 post, UI 订阅后用来驱动 activity spinner.
     static let activityStateDidChangeNotification = NSNotification.Name("LogiActivityStateDidChange")
 
+    /// 冲突状态变化通知; Step 4/5 会在 reporting query 完成等位置 post 此通知.
+    /// Step 2 仅声明命名,不在任何位置 post.
+    static let conflictChangedNotification = NSNotification.Name("LogiConflictChanged")
+
     // MARK: - Activity State Aggregation
 
     /// 最近一次已广播的聚合忙碌状态. 仅用于去抖 (transition-only post).
@@ -255,8 +262,6 @@ class LogiSessionManager {
 
     // MARK: - Logi Action Execution
 
-    enum DPICycleDirection { case up, down }
-
     /// 获取最佳活跃 session (优先已完成 init 的, 其次 BLE)
     private var primarySession: LogiDeviceSession? {
         // 优先: 已完成 init 的 session
@@ -278,7 +283,7 @@ class LogiSessionManager {
     }
 
     /// DPI 循环
-    func executeDPICycle(direction: DPICycleDirection) {
+    func executeDPICycle(direction: Direction) {
         guard let session = primarySession else { return }
         session.executeDPICycle(direction: direction)
     }
