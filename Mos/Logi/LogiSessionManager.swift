@@ -201,21 +201,12 @@ internal class LogiSessionManager {
     /// 优化: 没有任何 Logi 绑定时没人会看到冲突图标,直接跳过以省去无谓的 HID++ 往返
     /// (对没 Logi 鼠标的用户自动生效, 因为此时 sessions 也必然为空).
     func refreshReportingStatesIfNeeded() {
-        guard hasAnyLogitechBinding else { return }
+        if LogiCenter.shared.registry.aggregatedCacheIsEmpty { return }
         if let last = lastReportingRefresh,
            Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
         lastReportingRefresh = Date()
         for session in sessions.values where session.isHIDPPCandidate {
             session.refreshReportingState()
-        }
-    }
-
-    /// 判断 Options.buttons.binding 中是否存在至少一个 Logi 按键触发器.
-    /// 检测 UI 仅在这种情况下有展示价值, 作为 refresh 的 gate.
-    private var hasAnyLogitechBinding: Bool {
-        return Options.shared.buttons.binding.contains { binding in
-            binding.triggerEvent.type == .mouse &&
-                LogiCIDDirectory.isLogitechCode(binding.triggerEvent.code)
         }
     }
 
