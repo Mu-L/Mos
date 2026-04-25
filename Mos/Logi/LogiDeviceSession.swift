@@ -193,6 +193,14 @@ class LogiDeviceSession {
         return usagePage == 0x0001 && usage == 0x0002
     }
 
+    internal var lastApplied: Set<UInt16> = []
+
+    internal func applyUsage(_ aggregateMosCodes: Set<UInt16>) {
+        // Step 3 Task 3.4 implements MosCode -> CID projection and IO.
+        // Stub for compilation in this task.
+        self.lastApplied = aggregateMosCodes
+    }
+
     // MARK: - Debug Accessors (for HID++ debug panel)
     var debugFeatureIndex: [UInt16: UInt8] { featureIndex }
     var debugDiscoveredControls: [ControlInfo] { discoveredControls }
