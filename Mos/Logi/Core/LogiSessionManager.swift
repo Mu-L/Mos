@@ -212,15 +212,17 @@ internal class LogiSessionManager {
 
     /// 查询某 Logi MosCode 当前是否被第三方 (如 Logitech Options+) 接管.
     /// 未连接设备 / 未完成 reporting 查询 / 非 Logi code -> unknown.
-    func conflictStatus(forMosCode mosCode: UInt16) -> LogiConflictDetector.Status {
+    func conflictStatus(forMosCode mosCode: UInt16) -> ConflictStatus {
         guard let cid = LogiCIDDirectory.toCID(mosCode) else { return .unknown }
         for session in sessions.values where session.isHIDPPCandidate {
             if let control = session.control(forCID: cid) {
+                let mosOwns = session.debugDivertedCIDs.contains(cid)
                 return LogiConflictDetector.status(
                     reportingFlags: control.reportingFlags,
                     targetCID: control.targetCID,
                     cid: cid,
-                    reportingQueried: control.reportingQueried
+                    reportingQueried: control.reportingQueried,
+                    mosOwnsDivert: mosOwns
                 )
             }
         }

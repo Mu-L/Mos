@@ -222,7 +222,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         }
 
         let status = LogiCenter.shared.conflictStatus(forMosCode: currentTriggerCode)
-        guard status == .conflict else {
+        guard status.isConflict else {
             setupDashedLine()
             return
         }

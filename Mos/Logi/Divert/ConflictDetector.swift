@@ -1,39 +1,47 @@
 //
-//  LogiConflictDetector.swift
+//  ConflictDetector.swift
 //  Mos
-//  判定某 Logi CID 当前 reporting 状态是否表明被第三方 (例如 Logitech Options+) 接管.
-//  Created by Mos on 2026/4/20.
-//  Copyright © 2026 Caldis. All rights reserved.
 //
 
 import Foundation
 
-/// Logitech HID++ CID 冲突判定
-///
-/// 前提 (方案 B): `reportingFlags` 与 `targetCID` 永远反映 **设备 GetControlReporting 响应** 的真值,
-/// 不受 Mos 自身 `setControlReporting` 操作污染. Mos 视角的 divert 状态由 `divertedCIDs` 集合单独表达.
-///
-/// 规则: 只要设备响应里 `reportingFlags` 或 `targetCID` 有任何非零位, 就说明接管前已被第三方设置 ->
-/// 冲突. 反之为 clear. 查询未完成返回 unknown.
-struct LogiConflictDetector {
+/// 5-state Logi CID conflict status (Round 4 H2: precedence foreign > remap > mos > clear).
+/// Backed by device-truth (reportingFlags + targetCID) plus Mos's own divertedCIDs set.
+public enum ConflictStatus: Equatable {
+    case clear
+    case foreignDivert
+    case remapped
+    case mosOwned
+    case unknown
 
-    enum Status: Equatable {
-        case unknown
-        case clear
-        case conflict
+    /// Legacy adapter for callers that previously checked `== .conflict`.
+    /// Conflict = a status the user should be alerted to (foreign divert + foreign remap).
+    public var isConflict: Bool {
+        switch self {
+        case .foreignDivert, .remapped: return true
+        case .clear, .mosOwned, .unknown: return false
+        }
     }
+}
 
-    static func status(
-        reportingFlags: UInt8,
-        targetCID: UInt16,
-        cid: UInt16,
-        reportingQueried: Bool
-    ) -> Status {
+/// Status detector for one Logi CID.
+/// Precedence (matches LogiDebugPanel cStatus column visual order):
+///   foreign-divert > remap > mos-owned > clear
+struct LogiConflictDetector {
+    static func status(reportingFlags: UInt8,
+                       targetCID: UInt16,
+                       cid: UInt16,
+                       reportingQueried: Bool,
+                       mosOwnsDivert: Bool) -> ConflictStatus {
         guard reportingQueried else { return .unknown }
-        // reportingFlags 非零 -> 第三方 tmpDivert / persistDivert
-        if reportingFlags != 0 { return .conflict }
-        // targetCID != 0 且 != cid -> 第三方真实 remap (排除 Logitech 默认的 self-remap identity mapping)
-        if targetCID != 0 && targetCID != cid { return .conflict }
+        // Foreign divert: device-side reporting bit set AND not by Mos.
+        let isForeignDivert = reportingFlags != 0 && !mosOwnsDivert
+        if isForeignDivert { return .foreignDivert }
+        // Remap: targetCID set to a different CID (self-remap is identity, not a remap).
+        let isRemapped = targetCID != 0 && targetCID != cid
+        if isRemapped { return .remapped }
+        // Mos owns the divert: bit set by Mos's own setControlReporting.
+        if mosOwnsDivert { return .mosOwned }
         return .clear
     }
 }

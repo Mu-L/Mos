@@ -7,9 +7,6 @@ import Cocoa
 final class LogiCenter {
     static let shared = LogiCenter()
 
-    // Step 2: temporary alias; Step 5 reshapes the underlying type and keeps this alias.
-    typealias ConflictStatus = LogiConflictDetector.Status
-
     // MARK: - Internal collaborators (Step 2: facade only delegates to manager;
     //                                  Step 3: registry added; Step 4: bridge filled in)
     private let manager: LogiSessionManager

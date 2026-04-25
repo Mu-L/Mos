@@ -2101,10 +2101,14 @@ extension LogiDebugPanel: NSTableViewDelegate {
         // 真正的第三方冲突 = 设备侧非零 且 不在 Mos 的 divertedCIDs 集合里.
         // 同一 CID 若被 Mos 与第三方同时 divert, 此处偏向 Mos 语义: ACTIONS 显示 Undivert 时
         // Status 也显示 DVRT, 不会再出现 "按钮是 Undivert 但标签却是 3rd-DVRT" 的隐藏矛盾.
-        let isMosDivert = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
-        let isForeignDivert = ctrl.reportingFlags != 0 && !isMosDivert
-        // self-remap (targetCID == cid) 是 Logitech 默认的 identity mapping, 不算 remap
-        let isRemapped = ctrl.targetCID != 0 && ctrl.targetCID != ctrl.cid
+        let mosOwns = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
+        let status = LogiConflictDetector.status(
+            reportingFlags: ctrl.reportingFlags,
+            targetCID: ctrl.targetCID,
+            cid: ctrl.cid,
+            reportingQueried: ctrl.reportingQueried,
+            mosOwnsDivert: mosOwns
+        )
 
         switch tableColumn?.identifier.rawValue {
         case "cCid": label.stringValue = String(format: "0x%04X", ctrl.cid)
@@ -2113,21 +2117,22 @@ extension LogiDebugPanel: NSTableViewDelegate {
             label.stringValue = HIDPPInfo.flagsDescription(ctrl.flags)
             label.textColor = .secondaryLabelColor
         case "cStatus":
-            if isForeignDivert {
-                // 第三方 tmpDivert / persistDivert -> 冲突信号, 红色
+            switch status {
+            case .foreignDivert:
                 label.stringValue = "3rd-DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.3, alpha: 0.9)
-            } else if isRemapped {
-                // 第三方 remap -> 黄色
+            case .remapped:
                 label.stringValue = "REMAP"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.8, blue: 0.2, alpha: 0.8)
-            } else if isMosDivert {
-                // Mos 自己 divert -> 橘色
+            case .mosOwned:
                 label.stringValue = "DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
-            } else {
+            case .clear:
                 label.stringValue = "\u{25CF}"
                 label.textColor = NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0)
+            case .unknown:
+                label.stringValue = "?"
+                label.textColor = .tertiaryLabelColor
             }
         default: break
         }
