@@ -25,6 +25,7 @@ final class LogiCenterPublicSurfaceTests: XCTestCase {
         XCTAssertFalse(LogiCenter.discoveryStateChanged.rawValue.isEmpty)
         XCTAssertFalse(LogiCenter.reportingDidComplete.rawValue.isEmpty)
         XCTAssertFalse(LogiCenter.activityChanged.rawValue.isEmpty)
+        XCTAssertFalse(LogiCenter.conflictChanged.rawValue.isEmpty)
         XCTAssertFalse(LogiCenter.rawButtonEvent.rawValue.isEmpty)
         XCTAssertFalse(LogiCenter.buttonEventRelay.rawValue.isEmpty)
     }

@@ -13,7 +13,7 @@ final class LogiCenter {
     // MARK: - Internal collaborators (Step 2: facade only delegates to manager;
     //                                  Step 3: registry added; Step 4: bridge filled in)
     private let manager: LogiSessionManager
-    internal var externalBridge: LogiExternalBridge
+    internal private(set) var externalBridge: LogiExternalBridge
 
     // MARK: - Production init
     private init() {
