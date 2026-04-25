@@ -29,6 +29,7 @@ ZONE_A_ALLOW=(
     SessionActivityStatus
     LogiIntegrationBridge
     LogiUsageBootstrap
+    LogiSelfTestWizard
 )
 
 ZONE_B_ADDITIONAL=(
