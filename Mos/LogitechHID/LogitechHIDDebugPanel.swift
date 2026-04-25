@@ -155,6 +155,15 @@ struct HIDPPFeatureActions {
 
 class LogitechHIDDebugPanel: NSObject {
 
+    #if DEBUG
+    internal static var autosaveNamesSnapshotForTests: [String] {
+        // List of all NSSplitView.autosaveName literals used in this file.
+        // If you add a new autosaveName, you MUST update LogiPersistenceCanaryTests
+        // golden list to match.
+        return ["HIDDebug.FeaturesControls.v3"]
+    }
+    #endif
+
     static let shared = LogitechHIDDebugPanel()
     static let logNotification = NSNotification.Name("LogitechHIDDebugLog")
 

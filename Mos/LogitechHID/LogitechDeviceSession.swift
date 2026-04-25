@@ -121,6 +121,10 @@ class LogitechDeviceSession {
     // MARK: - Feature Index Cache (按 PID 缓存, 减少重连 discovery 延迟)
     private static let featureCacheKey = "logitechFeatureCache"
 
+    #if DEBUG
+    internal static var featureCacheKeyForTests: String { return featureCacheKey }
+    #endif
+
     private static func loadCachedFeatureIndex(for productId: UInt16) -> [UInt16: UInt8]? {
         guard let data = UserDefaults.standard.data(forKey: featureCacheKey),
               let cache = try? JSONDecoder().decode([UInt16: [UInt16: UInt8]].self, from: data) else { return nil }
