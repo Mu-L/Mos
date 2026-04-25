@@ -319,8 +319,8 @@ class LogitechDeviceSession {
     static let inputReportCallback: IOHIDReportCallback = { context, result, sender, type, reportID, report, reportLength in
         guard let context = context else { return }
         let session = Unmanaged<LogitechDeviceSession>.fromOpaque(context).takeUnretainedValue()
-        let data = Array(UnsafeBufferPointer(start: report, count: reportLength))
-        session.handleInputReport(data)
+        let buffer = UnsafeBufferPointer(start: report, count: reportLength)
+        session.handleInputReport(buffer)
     }
 
     // MARK: - HID++ Send
@@ -695,7 +695,7 @@ class LogitechDeviceSession {
     // MARK: - Receiver Response Handlers
 
     /// 处理 HID++ 1.0 错误响应 (sub-ID 0x8F)
-    private func handleHIDPP10Error(_ report: [UInt8]) {
+    private func handleHIDPP10Error(_ report: UnsafeBufferPointer<UInt8>) {
         let devIdx = report[1]
         let errorSubId = report[3]
         let errorAddress = report.count > 4 ? report[4] : 0
@@ -730,7 +730,7 @@ class LogitechDeviceSession {
     }
 
     /// 处理 ping 响应 (device slot 回复 IRoot.Ping)
-    private func handleSlotPingResponse(devIdx: UInt8, report: [UInt8]) {
+    private func handleSlotPingResponse(devIdx: UInt8, report: UnsafeBufferPointer<UInt8>) {
         pendingSlotPings.remove(devIdx)
         let protMajor = report[4]
         let protMinor = report[5]
@@ -788,7 +788,7 @@ class LogitechDeviceSession {
     }
 
     /// 处理 receiver register 响应
-    private func handleReceiverRegisterResponse(_ report: [UInt8]) {
+    private func handleReceiverRegisterResponse(_ report: UnsafeBufferPointer<UInt8>) {
         let register = report[3]
 
         if register == Self.receiverPairingInfo {
@@ -820,7 +820,7 @@ class LogitechDeviceSession {
     }
 
     /// 处理设备连接/断开通知 (sub-ID 0x41)
-    private func handleDeviceConnectionNotification(_ report: [UInt8]) {
+    private func handleDeviceConnectionNotification(_ report: UnsafeBufferPointer<UInt8>) {
         let devIdx = report[1]
         let protocolType = report.count > 3 ? report[3] : 0
         let devInfo = report.count > 4 ? report[4] : 0
@@ -880,7 +880,7 @@ class LogitechDeviceSession {
         return "Feature[0x\(String(format: "%02X", featureIndex))].func\(functionId)"
     }
 
-    private func decodeReport(_ report: [UInt8]) -> String {
+    private func decodeReport(_ report: UnsafeBufferPointer<UInt8>) -> String {
         guard report.count >= 7 else { return "short report" }
         let devIdx = report[1]
         let featIdx = report[2]
@@ -1199,7 +1199,7 @@ class LogitechDeviceSession {
 
     // MARK: - Report Parsing
 
-    func handleInputReport(_ report: [UInt8]) {
+    func handleInputReport(_ report: UnsafeBufferPointer<UInt8>) {
         guard report.count >= 7 else { return }
         guard report[0] == Self.hidppShortReportId || report[0] == Self.hidppLongReportId else { return }
 
@@ -1469,7 +1469,7 @@ class LogitechDeviceSession {
         }
     }
 
-    private func handleDiscoveryResponse(_ report: [UInt8]) {
+    private func handleDiscoveryResponse(_ report: UnsafeBufferPointer<UInt8>) {
         let discoveredIndex = report[4]
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] IRoot response: discoveredIndex=\(String(format: "0x%02X", discoveredIndex))")
         if let (featureId, callback) = pendingDiscovery.first {
@@ -1479,7 +1479,7 @@ class LogitechDeviceSession {
         }
     }
 
-    private func handleGetControlCountResponse(_ report: [UInt8]) {
+    private func handleGetControlCountResponse(_ report: UnsafeBufferPointer<UInt8>) {
         reprogControlCount = Int(report[4])
         reprogQueryIndex = 0
         discoveredControls.removeAll()
@@ -1492,7 +1492,7 @@ class LogitechDeviceSession {
         }
     }
 
-    private func handleGetControlInfoResponse(_ report: [UInt8]) {
+    private func handleGetControlInfoResponse(_ report: UnsafeBufferPointer<UInt8>) {
         guard report.count >= 11 else { return }
         let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
         let taskId = (UInt16(report[6]) << 8) | UInt16(report[7])
@@ -1573,7 +1573,7 @@ class LogitechDeviceSession {
         }
     }
 
-    private func handleGetControlReportingResponse(_ report: [UInt8]) {
+    private func handleGetControlReportingResponse(_ report: UnsafeBufferPointer<UInt8>) {
         guard report.count >= 9 else { return }
         // response: byte[4-5]=CID, byte[6]=reportingFlags, byte[7-8]=targetCID
         let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
@@ -1683,7 +1683,7 @@ class LogitechDeviceSession {
         syncDivertWithBindings()
     }
 
-    private func handleDivertedButtonEvent(_ report: [UInt8]) {
+    private func handleDivertedButtonEvent(_ report: UnsafeBufferPointer<UInt8>) {
         var activeCIDs: Set<UInt16> = []
         var offset = 4
         while offset + 1 < report.count {
