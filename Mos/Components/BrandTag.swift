@@ -31,7 +31,7 @@ struct BrandTag {
 
     /// 按键码是否属于某个品牌
     static func isLogiCode(_ code: UInt16) -> Bool {
-        return LogiCIDDirectory.isLogitechCode(code)
+        return LogiCenter.shared.isLogiCode(code)
     }
 
     /// 快捷键 ID 是否属于某个品牌

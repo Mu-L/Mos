@@ -79,10 +79,10 @@ struct ActionDisplayResolver {
         }
 
         let brand = BrandTag.brandForCode(code)
-        if let brand, modifiers == 0, LogiCIDDirectory.isLogitechCode(code) {
+        if let brand, modifiers == 0, LogiCenter.shared.isLogiCode(code) {
             return ActionPresentation(
                 kind: .namedAction,
-                title: LogiCIDDirectory.name(forMosCode: code),
+                title: (LogiCenter.shared.name(forMosCode: code) ?? ""),
                 symbolName: nil,
                 badgeComponents: [],
                 brand: brand
