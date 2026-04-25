@@ -30,6 +30,7 @@ final class UsageRegistry {
         #endif
         let existing = sources[source]
         if existing == codes { return }
+        if existing == nil && codes.isEmpty { return }
         if codes.isEmpty {
             sources.removeValue(forKey: source)
         } else {
