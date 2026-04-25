@@ -11,16 +11,19 @@ final class UsageRegistryEndToEndTests: XCTestCase {
         session.divertableCIDs = [0x0050, 0x0051, 0x0052, 0x0053, 0x0056]
     }
 
-    func testSetUsage_drivesApplyUsage_onCoalescedDrain() {
-        var recomputed = false
+    func testCoalescedDrain_multipleSetUsage_singleRecompute() {
+        var recomputeCount = 0
         let registry = UsageRegistry(sessionProvider: { [] }) {
-            recomputed = true
+            recomputeCount += 1
         }
+        // Multiple setUsage in the same main-queue tick should collapse to 1 recompute.
         registry.setUsage(source: .buttonBinding, codes: [1006])
-        let exp = expectation(description: "drain")
-        DispatchQueue.main.async { exp.fulfill() }
-        wait(for: [exp], timeout: 1.0)
-        XCTAssertTrue(recomputed)
+        registry.setUsage(source: .globalScroll(.dash), codes: [1007])
+        registry.setUsage(source: .appScroll(key: "Chrome", role: .toggle), codes: [1005])
+        let drained = expectation(description: "main drain")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1.0)
+        XCTAssertEqual(recomputeCount, 1, "3 setUsage in same tick should trigger 1 recompute")
     }
 
     func testReconnectNoDiff_freshSessionApplyAggregate() {
