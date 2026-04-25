@@ -1,7 +1,7 @@
 # Logi Module Consolidation — Design Spec
 
 **Date**: 2026-04-25
-**Status**: Design v2 (post Codex review × 2)
+**Status**: Design v3 (post Codex review × 3 — closure verification round folded)
 **Supersedes**: N/A
 **Related**:
 - `2026-03-16-logitech-hid-integration-design.md` (original HID++ integration)
@@ -11,7 +11,20 @@
 ## Revision history
 
 - **v1 (initial)**: brainstormed surface — single facade, push-driven UsageRegistry, two-method bridge, full rename. Two rounds of Codex review (gpt-5.5 + xhigh) surfaced 27 findings (12 H, 11 M, 4 L).
-- **v2 (this doc)**: folds all 27 findings. Material changes:
+- **v3 (this doc)**: Round 3 closure verification (gpt-5.5 + xhigh) confirmed 17 of 27 findings closed; 9 partial + 10 new gaps (4 H + 6 M) fixed inline. Material changes vs v2:
+  - `LogiDeviceSession.applyUsage` now performs explicit `MosCode → CID` projection via `LogiCIDDirectory.toCID` before intersecting with `divertableCIDs` (Round 3 H1 — fixes the type-system error that would have silently produced an empty intersection in v2).
+  - `LogiExternalBridge` / `LogiDispatchResult` / `LogiToastSeverity` are now `internal` (same Mos target as `InputEvent` / `InputPhase`); attempting `public` would force `InputEvent` public too. Lint rule still allows them only inside `Mos/Logi/` and `Mos/Integration/`.
+  - `LogiIntegrationBridge.showLogiToast` calls real `Toast.show(_ message: String, style: Toast.Style)` API; mapping LogiToastSeverity → Toast.Style explicit.
+  - `start()` does not assert "bridge is not NoOp" (would break Steps 2/3); operational acceptance criterion in §11 enforces it from Step 4 onward.
+  - `ConflictDetector` precedence reordered to `foreignDivert > remapped > mosOwned > clear`, matching current DebugPanel rendering at `LogitechHIDDebugPanel.swift:2107–2122`. New 4-state enum; `isConflict` adapter for callers using legacy boolean check.
+  - Wizard `WaitCondition.rawButtonEvent(mosCode:cid:)` accepts both axes; userInfo schema documented to carry both.
+  - Scroll-hotkey `.up` invariant explicitly applies to `setTargetSlot` and `rediscoverFeatures` in addition to `teardown`. Pre-existing latent bug fixed as part of Step 4.
+  - Tier 2 `UsageRegistryEndToEndTests` enumerates all 6 prime hooks individually.
+  - Application `inherit` toggle (true/false) drives explicit setUsage calls; not just deletion.
+  - G1 (acceptance gate) revised: hot-path NotificationCenter posts limited to exactly two — `rawButtonEvent` (always) and `buttonEventRelay` (recording or unconsumed). No new posts beyond these two.
+  - Step 2's `installBridge(LogiNoOpBridge.shared)` is explicit and intentional — Step 4 will swap it; CI lint enforces non-NoOp in release builds after Step 4.
+  - F18 inventory adds `ButtonTableCellView.swift` (lines 78, 219) — both `LogitechCIDRegistry.isLogitechCode` calls — to Step 2's facade rewrite list.
+- **v2**: folds all 27 findings from Round 1+2. Material changes:
   - Bridge protocol redesigned to return `LogiDispatchResult` enum that includes `.logiAction(name:)`, removing the need for the Logi module to know `ButtonUtils` while keeping logi* fast-path execution in the originating session (F1).
   - Convergence model switched from registry-wide `lastApplied` to per-session `lastApplied`, eliminating reconnect-no-diff failures (F4).
   - Performance budget rewritten with measured numbers from `swiftc -O` micro-bench (F7) and a new Step 0 to remove the per-input-report `Array` heap allocation in `inputReportCallback` (F11).
@@ -45,7 +58,7 @@ Symptom felt by users: "按键偏好页说 Back Button 未绑定,但 Debug 面�
 3. **Push-driven usage model**: preference panels and a startup bootstrap declare "this source uses these codes" via `LogiCenter.shared.setUsage(source:codes:)`. Logi does not scan Options.
 4. **Inverted external dependencies**: ScrollCore / ButtonUtils / InputProcessor / Toast access lives behind a `LogiExternalBridge` protocol implemented outside the Logi module. Bridge is strong-referenced (not weak) and required to be installed before `start()`.
 5. **Persistence byte-compatible**: `UserDefaults["logitechFeatureCache"]` and the `"HIDDebug.FeaturesControls.v3"` `autosaveName` literal frozen. Zero new persistence keys.
-6. **Per-event hot path stays cheap**: no new heap allocations, no new `NotificationCenter.post`, no new `DispatchQueue.*` on the input-report → button-dispatch path. (Step 0 also removes an *existing* per-report `Array` allocation that the v1 spec ignored.)
+6. **Per-event hot path stays cheap**: at most two `NotificationCenter.post` calls per event (the new `rawButtonEvent` for deterministic observation, and the existing `buttonEventRelay` from the bridge); no `DispatchQueue.*` async/sync on the dispatch path; no new closures or heap allocations beyond the two notification userInfo dicts. (Step 0 separately removes an *existing* per-input-report `Array` allocation that v1 ignored — not on the dispatch hot path itself but on the same callback chain, see §8.)
 7. **Per-session convergence guaranteed**: every session readiness / state-reset path applies the current usage aggregate via prime, not via `lastApplied` diffs that can be skipped.
 8. **Test coverage**: pure logic (Tier 1) + harness tests (Tier 2 with realistic fakes) + real-device integration (Tier 3a/b with `0 → 1 → 0` baseline) + interactive Self-Test Wizard (Tier 3c with per-step cancellation).
 
@@ -152,6 +165,9 @@ final class LogiCenter {
     /// before any dispatch decision (recording / consumed / unhandled / logiAction).
     /// Use this for self-test wizard and debug panel observers that need a guaranteed
     /// "saw a press" signal regardless of routing outcome.
+    /// userInfo schema: ["event": InputEvent, "mosCode": UInt16, "cid": UInt16, "phase": "down"|"up"].
+    /// MosCode and CID are both pre-resolved so observers can match either; current code
+    /// already has the CID at the post site (before MosCode conversion to InputEvent).
     static let rawButtonEvent:        Notification.Name
 
     /// Existing relay: posted only in (a) recording mode (b) non-consumed events.
@@ -162,12 +178,11 @@ final class LogiCenter {
 // Public value-type surface (referenced by external code per acceptance §11)
 public enum UsageSource: Hashable { /* see 4.3 */ }
 public enum ScrollRole: Hashable { case dash, toggle, block }
-public enum ConflictStatus { case clear, conflict, mosOwned, unknown }
-public protocol LogiExternalBridge: AnyObject { /* see 4.4 */ }
-public enum LogiDispatchResult: Equatable { /* see 4.4 */ }
+public enum ConflictStatus { case clear, foreignDivert, remapped, mosOwned, unknown; var isConflict: Bool { /* see 4.6 */ } }
 public enum Direction { case up, down }
 public struct LogiDeviceSessionSnapshot { /* read-only view */ }
 public struct SessionActivityStatus { /* already exists */ }
+// LogiExternalBridge / LogiDispatchResult / LogiToastSeverity are INTERNAL; see 4.4.
 
 extension LogiCenter {
     // Test-injectable constructor (internal). Only used by Tier 2 harness tests.
@@ -271,19 +286,24 @@ private func runRecompute() {
 | `redivertAllControls` (debug action) | clear divertedCIDs, then apply |
 | Each `setUsage` → `runRecompute` | apply to all currently-ready sessions |
 
-Internally `applyUsage` computes its own diff against `self.lastApplied`:
+Internally `applyUsage` computes its own diff against `self.lastApplied`. **Critical**: `aggregate` is a set of MosCodes (driven by binding/scroll codes from Options); the device speaks CIDs. Conversion via `LogiCIDDirectory.toCID(_:)` happens before the diff (mirrors current `LogitechDivertPlanner.plan` semantics):
 
 ```swift
-internal func applyUsage(_ aggregate: Set<UInt16>) {
+internal func applyUsage(_ aggregateMosCodes: Set<UInt16>) {
     guard let reprogIdx = featureIndex[Self.featureReprogV4] else { return }
-    let target = aggregate.intersection(divertableCIDs)
-    let toDivert = target.subtracting(self.lastApplied)
-    let toUndivert = self.lastApplied.subtracting(target)
+    // Project MosCodes -> CIDs, drop unmapped, intersect with divertable CIDs
+    let targetCIDs: Set<UInt16> = aggregateMosCodes.reduce(into: Set<UInt16>()) { acc, code in
+        if let cid = LogiCIDDirectory.toCID(code), divertableCIDs.contains(cid) { acc.insert(cid) }
+    }
+    let toDivert = targetCIDs.subtracting(self.lastApplied)       // self.lastApplied: Set<UInt16> of CIDs
+    let toUndivert = self.lastApplied.subtracting(targetCIDs)
     for cid in toDivert { setControlReporting(featureIndex: reprogIdx, cid: cid, divert: true) }
     for cid in toUndivert { setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false) }
-    self.lastApplied = target
+    self.lastApplied = targetCIDs
 }
 ```
+
+Tier 2 fakes (F23) mirror this conversion: `FakeLogiDeviceSession.applyUsage` performs the same `MosCode → CID` projection with a fake `divertableCIDs: Set<UInt16>` of CIDs and asserts on resulting `divertedCIDs` (CIDs).
 
 Diagnostic API:
 ```swift
@@ -294,10 +314,10 @@ func usages(of code: UInt16) -> [UsageSource] {
 
 ### 4.4 LogiExternalBridge
 
-**Protocol (lives inside Logi):**
+**Protocol (lives inside Logi). Same Xcode target as `InputEvent` / `InputPhase`, so the protocol is `internal` — that level is sufficient because `LogiIntegrationBridge` is also in-target. Public access would force `InputEvent` to be public too, which the spec explicitly avoids.**
 
 ```swift
-public protocol LogiExternalBridge: AnyObject {
+internal protocol LogiExternalBridge: AnyObject {
 
     /// (F3 recording invariant) Called by session for every Logi button event.
     /// Bridge MUST handle recording mode internally and return `.consumed` to
@@ -318,14 +338,16 @@ public protocol LogiExternalBridge: AnyObject {
     func showLogiToast(_ message: String, severity: LogiToastSeverity)
 }
 
-public enum LogiDispatchResult: Equatable {
+internal enum LogiDispatchResult: Equatable {
     case consumed                          // bridge fully handled (recording / non-logi binding consumed)
     case unhandled                         // not consumed; bridge made no decision
     case logiAction(name: String)          // bridge resolved a logi* binding; session executes
 }
 
-public enum LogiToastSeverity { case info, warning, error }
+internal enum LogiToastSeverity { case info, warning, error }
 ```
+
+These three symbols (`LogiExternalBridge`, `LogiDispatchResult`, `LogiToastSeverity`) are listed in §11 acceptance criteria as the **internal** boundary — the lint rule (F5) treats them as allowed only inside `Mos/Logi/` and `Mos/Integration/`.
 
 **Session call site (refactored `handleButtonEvent`):**
 
@@ -357,22 +379,32 @@ private func handleButtonEvent(_ event: InputEvent, isDown: Bool) {
 }
 ```
 
-**Teardown (F4 ordering invariant):**
+**Scroll-hotkey `.up` invariant (F4 / Round 3 gap7 — applies to ALL state-reset paths, not only teardown):**
 
-Before clearing `lastActiveCIDs`, switching slots, rediscovering, stopping, or removing a session, emit `.up` through the bridge while ScrollCore is still alive:
+Before clearing per-session state in any of these paths, emit `.up` through the bridge while ScrollCore is still alive:
+
+| Path | Where to emit |
+|---|---|
+| `teardown()` (session disconnect) | top of method, before HID release |
+| `setTargetSlot(slot:)` (slot switch) | before resetting featureIndex/discoveredControls/divertedCIDs/lastApplied |
+| `rediscoverFeatures()` | before resetting feature/control caches |
+| `LogiCenter.stop()` | before stopping the manager (so bridge is still wired) |
+
+A single helper:
 
 ```swift
-internal func teardown() {
+private func emitScrollHotkeyReleaseForActiveCIDs() {
     let bridge = LogiCenter.shared.externalBridge
     for cid in lastActiveCIDs {
         let mosCode = LogiCIDDirectory.toMosCode(cid)
         bridge.handleLogiScrollHotkey(code: mosCode, phase: .up)
     }
     lastActiveCIDs.removeAll()
-    self.lastApplied.removeAll()             // (F4) reset per-session convergence state
-    // ... existing HID release logic ...
+    self.lastApplied.removeAll()             // (F4) reset per-session convergence
 }
 ```
+
+Called from each path above. **Step 4 of the migration plan rewrites `teardown` AND adds calls to `emitScrollHotkeyReleaseForActiveCIDs()` from `setTargetSlot` / `rediscoverFeatures`** (currently only `teardown` does ScrollCore release; this fixes a pre-existing latent bug where slot switch could leave ScrollCore holding a "down" state).
 
 **Production impl (`Mos/Integration/LogiIntegrationBridge.swift`):**
 
@@ -411,7 +443,16 @@ final class LogiIntegrationBridge: LogiExternalBridge {
     }
 
     func showLogiToast(_ message: String, severity: LogiToastSeverity) {
-        Toast.show(message: message, severity: severity.toastSeverity)
+        // Real Toast API is `Toast.show(_ message: String, style: Toast.Style)`
+        // where Style ∈ {.info, .success, .warning, .error}. Map LogiToastSeverity
+        // (info/warning/error) onto matching Toast.Style cases.
+        let style: Toast.Style
+        switch severity {
+        case .info:    style = .info
+        case .warning: style = .warning
+        case .error:   style = .error
+        }
+        Toast.show(message, style: style)
     }
 }
 
@@ -438,13 +479,19 @@ final class LogiCenter {
 
     func start() {
         #if DEBUG
-        precondition(!(externalBridge is LogiNoOpBridge),
-                     "LogiCenter.installBridge must be called before start()")
+        precondition(Thread.isMainThread)
+        // NOTE: the "bridge must not be NoOp" precondition is NOT enforced here.
+        // Steps 2 and 3 still run with LogiNoOpBridge (no bridge logic exists yet
+        // until Step 4). Step 4 introduces a separate strict assertion for that:
+        // see §6 Step 4 — "DEBUG: assert externalBridge is LogiIntegrationBridge".
+        // Putting the assertion in start() would make Steps 2/3 non-runnable.
         #endif
         // ... existing manager.start() logic
     }
 }
 ```
+
+(F10/F17 sequencing) The "bridge must be the production impl, not NoOp" check is an **operational** acceptance criterion enforced from Step 4 onward (see §11). It is not a runtime precondition in `start()`, because Steps 2 and 3 must boot with NoOp.
 
 `externalBridge` is a strong, non-optional reference. `LogiIntegrationBridge.shared` is a permanent singleton; no retain-cycle risk because the bridge holds no Logi references. Per Round 2 micro-bench: strong existential call ≈ 0.892 ns/op vs. weak optional existential ≈ 37 ns/op.
 
@@ -500,10 +547,10 @@ Preference panels' save paths still call `setUsage(...)` per-source, identical t
 
 ### 4.6 ConflictDetector update (F6)
 
-The conflict detector's existing input set is `(reportingFlags, targetCID, cid, reportingQueried)`. As of commit `195908a`, the rule "device reportingFlags non-zero ⇒ third-party" is wrong because Mos's own divert bit also reads back. New input adds `mosOwnsDivert: Bool`:
+The conflict detector's existing input set is `(reportingFlags, targetCID, cid, reportingQueried)`. As of commit `195908a`, the rule "device reportingFlags non-zero ⇒ third-party" is wrong because Mos's own divert bit also reads back. New input adds `mosOwnsDivert: Bool`. **The precedence order MUST match the existing DebugPanel rendering at `LogitechHIDDebugPanel.swift:2107–2122`: foreign-divert → remap → mos-owned → clear.** Reordering changes user-visible status semantics:
 
 ```swift
-public enum ConflictStatus { case clear, conflict, mosOwned, unknown }
+public enum ConflictStatus { case clear, foreignDivert, remapped, mosOwned, unknown }
 
 enum ConflictDetector {
     static func status(reportingFlags: UInt8,
@@ -512,14 +559,20 @@ enum ConflictDetector {
                        reportingQueried: Bool,
                        mosOwnsDivert: Bool) -> ConflictStatus {
         guard reportingQueried else { return .unknown }
-        if mosOwnsDivert { return .mosOwned }
-        if reportingFlags == 0 && (targetCID == 0 || targetCID == cid) { return .clear }
-        return .conflict
+        // Order matches DebugPanel today; do not reorder.
+        let isForeignDivert = reportingFlags != 0 && !mosOwnsDivert
+        if isForeignDivert { return .foreignDivert }                          // red "3rd-DVRT"
+        let isRemapped = targetCID != 0 && targetCID != cid
+        if isRemapped { return .remapped }                                    // yellow "REMAP"
+        if mosOwnsDivert { return .mosOwned }                                 // orange "DVRT"
+        return .clear                                                         // green dot
     }
 }
 ```
 
-The Status column rendering in `LogiDebugPanel` already implements the equivalent at `LogiDebugPanel.swift:2089–2099` via `isMosDivert` exclusion (commit `195908a`); this section migrates the logic into `ConflictDetector` so all consumers share one rule.
+External callers using the legacy two-state `{.clear, .conflict}` API (e.g., `ButtonTableCellView` checks `status == .conflict` to draw a conflict glyph) treat any of `.foreignDivert | .remapped` as conflict; `.mosOwned` and `.clear` are non-conflict. A small adapter `ConflictStatus.isConflict: Bool` exposes that exact split for backward-compat call sites.
+
+The Status column rendering in `LogiDebugPanel` is rewired to call this detector and switch on the four-state result instead of computing the booleans inline.
 
 ### 4.7 Boundary enforcement (F5)
 
@@ -610,7 +663,7 @@ Risk: near zero. Compiler catches missed call sites; canary tests catch persiste
   - `Windows/PreferencesWindow/PreferencesWindowController.swift:35` (refreshReportingStatesIfNeeded) (F16)
   - `Windows/PreferencesWindow/ButtonsView/PreferencesButtonsViewController.swift` (refreshReportingStatesIfNeeded, isBusy, currentActivitySummary, activityStateDidChange notification) (F16)
   - `Windows/PreferencesWindow/ButtonsView/ButtonTableCellView.swift` (conflictStatus + sessionChanged + reportingDidComplete notifications)
-  - `InputEvent/InputEvent.swift`, `Components/BrandTag.swift`, `Windows/PreferencesWindow/ButtonsView/RecordedEvent.swift`, `Windows/PreferencesWindow/ButtonsView/ActionDisplayResolver.swift`, `Windows/PreferencesWindow/ScrollingView/PreferencesScrollingViewController.swift` — all `LogitechCIDRegistry.{isLogitechCode,name(forMosCode:)}` calls rewritten to `LogiCenter.shared.{isLogiCode,name(forMosCode:)}` (F18)
+  - `InputEvent/InputEvent.swift`, `Components/BrandTag.swift`, `Windows/PreferencesWindow/ButtonsView/RecordedEvent.swift`, `Windows/PreferencesWindow/ButtonsView/ActionDisplayResolver.swift`, `Windows/PreferencesWindow/ScrollingView/PreferencesScrollingViewController.swift`, `Windows/PreferencesWindow/ButtonsView/ButtonTableCellView.swift` (lines 78 + 219 — both `isLogitechCode`) — all `LogitechCIDRegistry.{isLogitechCode,name(forMosCode:)}` calls rewritten to `LogiCenter.shared.{isLogiCode,name(forMosCode:)}` (F18)
   - `Keys/KeyRecorder.swift:131,521` — `temporarilyDivertAll` / `restoreDivertToBindings` rewritten to `LogiCenter.shared.beginKeyRecording()` / `endKeyRecording()`. The session-internal helpers are kept private inside `LogiDeviceSession`.
 - (F17 sequencing) `LogiCenter` test-injectable `internal init(manager:bridge:clock:)` added — **without** `registry` parameter; UsageRegistry is introduced in Step 3 and the init grows a `registry:` parameter then. Step 2 facade remains buildable in isolation.
 - `LogiExternalBridge` protocol + `LogiNoOpBridge` declared with bodies stubbed.
@@ -638,7 +691,11 @@ Risk: low. No HID behavior change. `internal` boundary not yet enforced by lint;
   - `rediscoverFeatures()` → same
   - `redivertAllControls()` → clears `divertedCIDs` then `applyUsage(registry.aggregate)`
   - `restoreDivertToBindings()` → `applyUsage(registry.aggregate)`
-- (F15) `Application` deletion path in preferences calls `setUsage(.appScroll(key: app.path, role: .dash), codes: [])` for each role to drop the source from the registry; since `setUsage` removes empty sources (F21), the registry stays clean.
+- (F15 + Round 3 gap9) Per-app source teardown across **three** triggers:
+  - (a) Application **deletion**: panel calls `setUsage(.appScroll(key: app.path, role: r), codes: [])` for each `r ∈ {.dash, .toggle, .block}`. Empty codes drop source (F21).
+  - (b) Application toggled to **inherit = true**: same — its own scroll rules no longer apply, so its three sources must be cleared.
+  - (c) Application toggled back to **inherit = false**: re-push current scroll codes via the normal save path.
+  - These three call sites must be edited explicitly in `PreferencesApplicationViewController` and `PreferencesScrollingWithApplicationViewController`. Tier 1 `UsageRegistryTests` covers each transition.
 - Tests added: `UsageRegistryTests` (Tier 1), extended `LogiDivertPlannerTests` (Tier 1), `UsageRegistryEndToEndTests` (Tier 2 with realistic FakeLogiDeviceSession per F23), `LogiCenterDeviceIntegrationTests` (Tier 3a with 0 → 1 → 0 baseline per F24).
 
 Risk: medium. Semantic change — divert driver switches from synchronous scan to coalesced async + per-session prime. Tier 2 covers reconnect-no-diff (F4 regression test). Tier 3a baseline (F24) proves Mos is the actor.
@@ -691,7 +748,7 @@ Risk: very low. File moves + new debug-only feature + lint script.
 | File | Coverage |
 |---|---|
 | `LogiCenterHarnessTests.swift` | Injectable init, `installBridge` precondition, `start()` after install, start/stop idempotency, notification contracts |
-| `UsageRegistryEndToEndTests.swift` | Multiple `setUsage` same main-queue task → single `runRecompute` call; aggregated diff applied to all ready FakeLogiDeviceSessions; **(F4 reconnect)** S1 applies A → S1 disconnects (lastApplied wiped) → S2 connects → primed with A; **(F4 slot switch)** session.setTargetSlot resets lastApplied → re-prime |
+| `UsageRegistryEndToEndTests.swift` | Multiple `setUsage` same main-queue task → single `runRecompute` call; aggregated diff applied to all ready FakeLogiDeviceSessions; **(F4 — all 6 prime hooks tested individually)**: (1) session ready → applyUsage; (2) `rediscoverFeatures` → reset+reapply; (3) `setTargetSlot` → reset+reapply; (4) `restoreDivertToBindings` (recording end) → reapply; (5) `redivertAllControls` → clear + reapply; (6) `setUsage` → runRecompute → all-sessions-apply. Plus reconnect-no-diff: S1 applies A → S1 disconnects (lastApplied wiped) → S2 connects → primed with A even though aggregate didn't change. |
 | `LogiBridgeDispatchTests.swift` | (F3) recording → bridge returns .consumed, scroll hotkey NOT called; (F1) non-recording + logi* → bridge returns .logiAction(name), session executes; non-recording + non-logi binding → InputProcessor consumes → bridge returns .consumed; (F9) rawButtonEvent posted in all paths |
 | `LogiTeardownTests.swift` | `lastActiveCIDs` teardown emits `handleLogiScrollHotkey(phase: .up)` via bridge before HID release |
 | `LogiUsageBootstrapTests.swift` | (F2) `refreshAll()` reads Options state and pushes one setUsage per source; idempotent on re-run |
@@ -735,7 +792,11 @@ enum StepKind {
 }
 
 enum WaitCondition {
-    case rawButtonEvent(cid: UInt16)             // (F9) deterministic raw signal
+    /// (F9) Deterministic raw signal. Match by MosCode (matches InputEvent.code, what
+    /// the bridge actually carries) OR by CID (raw HID++ control id). Wizard usually
+    /// authors steps in CID terms because it picks the test target by CID, so the
+    /// canonical form takes both and matches whichever is present in userInfo.
+    case rawButtonEvent(mosCode: UInt16?, cid: UInt16?)
     case sessionConnected(ConnectionMode)
     case sessionDisconnected
     case divertApplied(cid: UInt16, expectBit0: Bool)
@@ -772,13 +833,13 @@ User guarantees one Logi device at a time. Wizard takes the first connected sess
 2. automatic — `detectConnection()`, display result
 3. automatic — wait `reportingDidComplete` (F8 ensures empty-controls path also fires)
 4. automatic — `setUsage(.buttonBinding, [codeBack])` → wait `divertApplied(0x0053, true)`
-5. physicalAutoVerified — "press Back Button" / wait `rawButtonEvent(0x0053)` / 5s timeout (F9)
+5. physicalAutoVerified — "press Back Button" / wait `rawButtonEvent(mosCode: 1006, cid: 0x0053)` / 5s timeout (F9)
 6. **physicalUserConfirmed** — "Did Mos intercept the default Back behavior?"
 7. automatic — `setUsage(.buttonBinding, [])` → wait `divertApplied(0x0053, false)`
 8. automatic — `executeDPICycle(.up)` → wait `dpiChanged` → assert direction
 9. automatic — `executeSmartShiftToggle()` → assert smartShift mode toggled
 10. automatic — `beginKeyRecording()` → assert all divertable CIDs in divertedCIDs (per current snapshot)
-11. physicalAutoVerified — "press any Logi button in 5s" / wait `rawButtonEvent(any)`
+11. physicalAutoVerified — "press any Logi button in 5s" / wait `rawButtonEvent(mosCode: nil, cid: nil)` (matches any)
 12. automatic — `endKeyRecording()` → assert divertedCIDs back to bound codes
 13. physicalAutoVerified — "unplug Bolt receiver" / wait `sessionDisconnected`
 14. physicalAutoVerified — "replug Bolt" / wait `sessionConnected(.receiver)` + `reportingDidComplete`
@@ -850,9 +911,12 @@ session.handleInputReport(buffer)
 
 The following are **operational** acceptance criteria (verifiable by code review and tests), replacing the v1 spec's non-verifiable "≤ 5 ns" claim:
 
-- **(G1)** `LogiDeviceSession.handleButtonEvent` body must contain at most one `NotificationCenter.post` call per branch (rawButtonEvent always; bridge handles the conditional buttonEventRelay).
-- **(G2)** `LogiDeviceSession.handleButtonEvent` body must contain zero `DispatchQueue.*` calls.
-- **(G3)** `LogiIntegrationBridge.dispatchLogiButtonEvent` body must contain zero `DispatchQueue.*` calls.
+- **(G1)** Hot-path NotificationCenter posts are exactly two and explicit:
+  - `rawButtonEvent` posted unconditionally in `LogiDeviceSession.handleButtonEvent` (this is the only intentional new post; documented heap allocation cost in §8 Hot path 1).
+  - `buttonEventRelay` posted by `LogiIntegrationBridge.dispatchLogiButtonEvent` in exactly two branches: recording-mode and unconsumed.
+  No other `NotificationCenter.post` calls allowed in `handleButtonEvent` or `dispatchLogiButtonEvent`.
+- **(G2)** `LogiDeviceSession.handleButtonEvent` body contains zero `DispatchQueue.*` calls.
+- **(G3)** `LogiIntegrationBridge.dispatchLogiButtonEvent` body contains zero `DispatchQueue.*` calls.
 - **(G4)** `LogiDeviceSession.handleInputReport` accepts `UnsafeBufferPointer<UInt8>`, not `[UInt8]`. (Step 0)
 - **(G5)** `LogiCenter.externalBridge` is `let`-stored or strong `var` — never `weak`.
 - **(G6)** `UsageRegistry.setUsage` body contains zero loops over codes (work is dict + Set + bool).
@@ -914,11 +978,11 @@ This refactor is complete when:
 
 - [ ] All six migration steps (0–5) committed with Codex plan + code review × 2 (gpt-5.5 xhigh) each
 - [ ] `Mos/Logi/` contains all Logi code; no file in that dir imports `ScrollCore`, `ButtonUtils`, `InputProcessor`, `Options`, `PreferencesWindow`, or `Toast`
-- [ ] CI lint (F5) passes: outside `Mos/Logi/` and `Mos/Integration/`, only the public surface symbols appear: `LogiCenter`, `UsageSource`, `ScrollRole`, `ConflictStatus`, `LogiExternalBridge`, `LogiDispatchResult`, `LogiToastSeverity`, `Direction`, `LogiDeviceSessionSnapshot`, `SessionActivityStatus`. All other Logi types are `internal`.
+- [ ] CI lint (F5) passes: outside `Mos/Logi/` and `Mos/Integration/`, only these symbols may appear: `LogiCenter`, `UsageSource`, `ScrollRole`, `ConflictStatus`, `Direction`, `LogiDeviceSessionSnapshot`, `SessionActivityStatus`. (Note: `LogiExternalBridge`, `LogiDispatchResult`, `LogiToastSeverity` are `internal` — same Mos target — and the lint allows them only inside `Mos/Logi/` and `Mos/Integration/`. They never appear in any other directory.)
 - [ ] `syncDivertWithBindings` and `collectBoundLogiMosCodes` symbols are deleted
 - [ ] `Debug.xctestplan` all green; `DebugWithDevice.xctestplan` all green with device attached
 - [ ] Self-Test Wizard: Bolt suite 14/14 pass on real Bolt receiver; BLE suite all pass on a real BLE peripheral
 - [ ] Persistence canary test green; verified that `"logitechFeatureCache"` still loads on upgrade from pre-refactor build
 - [ ] Hot-path operational gates G1–G7 (§8) pass on code review
 - [ ] Codex code review × 2 at gpt-5.5 xhigh across all six commits: no blocking issues
-- [ ] AppDelegate launch order: `installBridge` → `LogiUsageBootstrap.refreshAll` → `LogiCenter.start` (verified by launch test)
+- [ ] AppDelegate launch order: `installBridge(LogiIntegrationBridge.shared)` → `LogiUsageBootstrap.refreshAll` → `LogiCenter.start` (verified by launch test). After Step 4 lands, the installed bridge MUST not be `LogiNoOpBridge.shared` in any release-configuration build (CI grep + integration test asserts).
