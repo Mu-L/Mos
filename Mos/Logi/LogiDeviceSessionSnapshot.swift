@@ -7,10 +7,12 @@ struct LogiDeviceSessionSnapshot {
     let connectionMode: LogiDeviceSession.ConnectionMode
     let deviceInfo: InputDevice
     let pairedDevices: [LogiDeviceSession.ReceiverPairedDevice]
+    let discoveredControls: [LogiDeviceSession.ControlInfo]
 
     init(session: LogiDeviceSession) {
         self.connectionMode = session.connectionMode
         self.deviceInfo = session.deviceInfo
         self.pairedDevices = session.debugReceiverPairedDevices
+        self.discoveredControls = session.debugDiscoveredControls
     }
 }
