@@ -77,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     // 运行后启动滚动处理
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        LogiCenter.shared.installBridge(LogiNoOpBridge.shared)
         startWithAccessibilityPermissionsChecker(nil)
         UpdateManager.shared.scheduleCheckOnAppStartIfNeeded()
     }
@@ -94,7 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 关闭前停止滚动处理
     func applicationWillTerminate(_ aNotification: Notification) {
-        LogiSessionManager.shared.stop()
+        LogiCenter.shared.stop()
         ScrollCore.shared.disable()
         ButtonCore.shared.disable()
     }
@@ -110,14 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("First Initialization (Accessibility Authorization Needed)")
                 ScrollCore.shared.enable()
                 ButtonCore.shared.enable()
-                LogiSessionManager.shared.start()
+                LogiCenter.shared.start()
             }
         } else {
             if Utils.isHadAccessibilityPermissions() {
                 NSLog("Regular Initialization")
                 ScrollCore.shared.enable()
                 ButtonCore.shared.enable()
-                LogiSessionManager.shared.start()
+                LogiCenter.shared.start()
             } else {
                 // 如果应用不在辅助权限列表内, 则弹出欢迎窗口
                 WindowManager.shared.showWindow(withIdentifier: WINDOW_IDENTIFIER.introductionWindowController, withTitle: "")
@@ -140,7 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func sessionDidResign(notification: NSNotification){
         permissionRecoveryTimer?.invalidate()
         permissionRecoveryTimer = nil
-        LogiSessionManager.shared.stop()
+        LogiCenter.shared.stop()
         ScrollCore.shared.disable()
         ButtonCore.shared.disable()
     }
@@ -149,7 +150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 避免多个 Interceptor 同时触发导致重复处理
         guard ScrollCore.shared.isActive || ButtonCore.shared.isActive else { return }
         NSLog("Accessibility permission lost at runtime, disabling cores")
-        LogiSessionManager.shared.stop()
+        LogiCenter.shared.stop()
         ScrollCore.shared.disable()
         ButtonCore.shared.disable()
         Toast.show(
