@@ -8,13 +8,17 @@ import XCTest
 final class LogiFeatureActionDeviceTests: LogiDeviceIntegrationBase {
 
     func testExecuteDPICycle_doesNotCrash() throws {
-        let ready = expectation(forNotification: LogiCenter.reportingDidComplete, object: nil)
         if !(LogiCenter.shared.externalBridge is LogiIntegrationBridge) {
             LogiCenter.shared.installBridge(LogiIntegrationBridge.shared)
         }
-        LogiCenter.shared.start()
-        let waitResult = XCTWaiter.wait(for: [ready], timeout: 30)
-        try XCTSkipIf(waitResult != .completed, "No HID++ session became ready in 30s")
+
+        // If a previous test already brought sessions up, skip the wait-for-ready.
+        if LogiCenter.shared.activeSessionsSnapshot().isEmpty {
+            let ready = expectation(forNotification: LogiCenter.reportingDidComplete, object: nil)
+            LogiCenter.shared.start()
+            let waitResult = XCTWaiter.wait(for: [ready], timeout: 30)
+            try XCTSkipIf(waitResult != .completed, "No HID++ session became ready in 30s")
+        }
         try XCTSkipIf(LogiCenter.shared.activeSessionsSnapshot().isEmpty, "No active session")
 
         // Fire DPI cycle in both directions; must not crash.
