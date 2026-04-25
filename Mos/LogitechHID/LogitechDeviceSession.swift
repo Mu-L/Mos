@@ -1529,6 +1529,10 @@ class LogitechDeviceSession {
         reportingQueryIndex = 0
         guard !discoveredControls.isEmpty, let idx = featureIndex[Self.featureReprogV4] else {
             divertBoundControls()
+            // 镜像 advanceReportingQuery 正常终态: 即使 controls 为空也必须 post,
+            // 否则 Self-Test Wizard 的 "wait reportingDidComplete" 会无限挂起.
+            NotificationCenter.default.post(name: LogitechHIDManager.reportingQueryDidCompleteNotification, object: nil)
+            LogitechHIDManager.shared.recomputeAndNotifyActivityState()
             return
         }
         LogitechHIDDebugPanel.log("[\(deviceInfo.name)] Querying reporting state for \(discoveredControls.count) controls...")

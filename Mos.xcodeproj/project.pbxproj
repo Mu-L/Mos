@@ -22,6 +22,7 @@
 		C3D4E5F6A7B8C9D0E1F30200 /* MosTests/InputProcessorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F30201 /* MosTests/InputProcessorTests.swift */; };
 		D1A2B3C4E5F6A7B8C9D01000 /* MosTests/LogitechDivertPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4E5F6A7B8C9D01001 /* MosTests/LogitechDivertPlannerTests.swift */; };
 		D1A2B3C4E5F6A7B8C9D01100 /* MosTests/LogitechConflictDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4E5F6A7B8C9D01101 /* MosTests/LogitechConflictDetectorTests.swift */; };
+		D1A2B3C4E5F6A7B8C9D01200 /* MosTests/LogiReportingDidCompleteEmptyPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4E5F6A7B8C9D01201 /* MosTests/LogiReportingDidCompleteEmptyPathTests.swift */; };
 		FE05F3803FB8885AAC70ADC5 /* MosTests/ScrollCoreHotkeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6CF5441214A14BB8FFEDA5 /* MosTests/ScrollCoreHotkeyTests.swift */; };
 		FECC8D1CC04A0A99B1E1A8EB /* MosTests/InterpolatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D4A7F821E5626C63C45D698 /* MosTests/InterpolatorTests.swift */; };
 /* End PBXBuildFile section */
@@ -51,6 +52,7 @@
 		C3D4E5F6A7B8C9D0E1F30201 /* MosTests/InputProcessorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/InputProcessorTests.swift; sourceTree = SOURCE_ROOT; };
 		D1A2B3C4E5F6A7B8C9D01001 /* MosTests/LogitechDivertPlannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/LogitechDivertPlannerTests.swift; sourceTree = SOURCE_ROOT; };
 		D1A2B3C4E5F6A7B8C9D01101 /* MosTests/LogitechConflictDetectorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/LogitechConflictDetectorTests.swift; sourceTree = SOURCE_ROOT; };
+		D1A2B3C4E5F6A7B8C9D01201 /* MosTests/LogiReportingDidCompleteEmptyPathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/LogiReportingDidCompleteEmptyPathTests.swift; sourceTree = SOURCE_ROOT; };
 		D3A7FDB8A6001907C9F156D6 /* MosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MosTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1B8B50E951D72C6195DBA3A /* MosTests/ScrollEventTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/ScrollEventTests.swift; sourceTree = SOURCE_ROOT; };
 		E7D69BB23DED610DCD5A0103 /* MosTests/ScrollHotkeyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MosTests/ScrollHotkeyTests.swift; sourceTree = SOURCE_ROOT; };
@@ -100,6 +102,7 @@
 				C3D4E5F6A7B8C9D0E1F30201 /* MosTests/InputProcessorTests.swift */,
 				D1A2B3C4E5F6A7B8C9D01001 /* MosTests/LogitechDivertPlannerTests.swift */,
 				D1A2B3C4E5F6A7B8C9D01101 /* MosTests/LogitechConflictDetectorTests.swift */,
+				D1A2B3C4E5F6A7B8C9D01201 /* MosTests/LogiReportingDidCompleteEmptyPathTests.swift */,
 				B3D4E5F6A7B8C9D0E1F40101 /* MosTests/MouseInteractionSessionControllerTests.swift */,
 				9D4A7F821E5626C63C45D698 /* MosTests/InterpolatorTests.swift */,
 				2D6CF5441214A14BB8FFEDA5 /* MosTests/ScrollCoreHotkeyTests.swift */,
@@ -274,6 +277,7 @@
 				C3D4E5F6A7B8C9D0E1F30200 /* MosTests/InputProcessorTests.swift in Sources */,
 				D1A2B3C4E5F6A7B8C9D01000 /* MosTests/LogitechDivertPlannerTests.swift in Sources */,
 				D1A2B3C4E5F6A7B8C9D01100 /* MosTests/LogitechConflictDetectorTests.swift in Sources */,
+				D1A2B3C4E5F6A7B8C9D01200 /* MosTests/LogiReportingDidCompleteEmptyPathTests.swift in Sources */,
 				B3D4E5F6A7B8C9D0E1F40100 /* MosTests/MouseInteractionSessionControllerTests.swift in Sources */,
 				FE05F3803FB8885AAC70ADC5 /* MosTests/ScrollCoreHotkeyTests.swift in Sources */,
 				0E590C87FC41F66FF48D518F /* MosTests/ScrollDispatchContextTests.swift in Sources */,
