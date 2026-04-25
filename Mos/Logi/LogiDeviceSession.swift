@@ -205,6 +205,10 @@ class LogiDeviceSession {
         #if DEBUG
         precondition(Thread.isMainThread, "applyUsage main-thread-only")
         #endif
+        // Mid-discovery guard: isHIDPPCandidate is a static vendor/product check and is true
+        // throughout discovery. If a setUsage fires before divertBoundControls runs, applyUsage
+        // would diff against partial discoveredControls. The post-discovery prime catches up.
+        guard reprogInitComplete else { return }
         guard let reprogIdx = featureIndex[Self.featureReprogV4] else { return }
         // Project MosCodes -> CIDs, drop unmapped, intersect with divertable CIDs.
         let divertable = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
@@ -1722,6 +1726,10 @@ class LogiDeviceSession {
         for c in divertable where !divertedCIDs.contains(c.cid) {
             setControlReporting(featureIndex: idx, cid: c.cid, divert: true)
         }
+        // Sync lastApplied with the full divertable set so restoreDivertToBindings'
+        // applyUsage diff (toUndivert = lastApplied - targetCIDs) can correctly
+        // compute toUndivert for recording-only CIDs after recording ends.
+        self.lastApplied = Set(divertable.map { $0.cid })
         LogiDebugPanel.log("[\(deviceInfo.name)] Temporarily diverted all \(divertable.count) controls (recording mode)")
     }
 
