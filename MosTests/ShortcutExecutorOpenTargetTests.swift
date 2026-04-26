@@ -77,35 +77,32 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
         XCTAssertEqual(ResolvedAction.logiAction(identifier: "logiSmartShiftToggle").executionMode, .trigger)
     }
 
-    func testOpenApplicationCommand_emptyArgumentsUsesSystemOpenWithoutArgsSentinel() {
-        let payload = OpenTargetPayload(
-            path: "/System/Applications/FindMy.app",
-            bundleID: "com.apple.findmy",
-            arguments: "",
-            kind: .application
-        )
-        let url = URL(fileURLWithPath: "/System/Applications/FindMy.app")
+    // MARK: - Subprocess env sanitization
 
-        let command = ShortcutExecutor.openApplicationCommand(for: payload, resolvedURL: url)
-
-        XCTAssertEqual(command.executableURL.path, "/usr/bin/open")
-        XCTAssertEqual(command.arguments, ["-b", "com.apple.findmy"])
+    func testSanitizedSubprocessEnvironment_stripsDyldInjection() {
+        // 在 ProcessInfo.environment 注入污染 vars 不可行 (read-only),
+        // 但我们可以通过白盒测试 shouldStripEnvKey 间接验证. 这里用 helper
+        // ShortcutExecutor.sanitizedSubprocessEnvironment() 把当前 env 过一遍,
+        // 断言常见污染 keys 一定不在结果里 (无论它们当前是否存在).
+        let env = ShortcutExecutor.sanitizedSubprocessEnvironment()
+        for key in env.keys {
+            XCTAssertFalse(key.hasPrefix("DYLD_"), "DYLD_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("__XPC_DYLD_"), "__XPC_DYLD_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("OS_ACTIVITY_DT_"), "OS_ACTIVITY_DT_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("MallocStack"), "MallocStack* 应该被剥离, 但留了 \(key)")
+            XCTAssertNotEqual(key, "NSZombieEnabled")
+            XCTAssertNotEqual(key, "NSDeallocateZombies")
+            XCTAssertFalse(key.hasPrefix("ASAN_"), "ASAN_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("TSAN_"), "TSAN_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("LSAN_"), "LSAN_* 应该被剥离, 但留了 \(key)")
+            XCTAssertFalse(key.hasPrefix("UBSAN_"), "UBSAN_* 应该被剥离, 但留了 \(key)")
+        }
     }
 
-    func testOpenApplicationCommand_argumentsAppendAfterArgsSentinel() {
-        let payload = OpenTargetPayload(
-            path: "/Applications/Safari.app",
-            bundleID: "com.apple.Safari",
-            arguments: "https://example.com \"with space\"",
-            kind: .application
-        )
-        let url = URL(fileURLWithPath: "/Applications/Safari.app")
-
-        let command = ShortcutExecutor.openApplicationCommand(for: payload, resolvedURL: url)
-
-        XCTAssertEqual(
-            command.arguments,
-            ["-b", "com.apple.Safari", "--args", "https://example.com", "with space"]
-        )
+    func testSanitizedSubprocessEnvironment_preservesNormalEnv() {
+        // 常规 env (PATH/HOME/USER 等) 必须保留, 否则脚本会跑不起来.
+        let env = ShortcutExecutor.sanitizedSubprocessEnvironment()
+        // 这些是 macOS shell 进程必有的, 只要脚本跑得起来就该有.
+        XCTAssertNotNil(env["PATH"] ?? env["HOME"], "至少一个常规 env 应被保留")
     }
 }

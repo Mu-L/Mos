@@ -52,10 +52,6 @@ enum ResolvedAction {
     }
 }
 
-struct OpenApplicationLaunchCommand: Equatable {
-    let executableURL: URL
-    let arguments: [String]
-}
 
 struct ActionExecutionResult {
     let mouseSessionID: UUID?
@@ -358,16 +354,17 @@ class ShortcutExecutor {
 
     private func launchApplication(_ payload: OpenTargetPayload) {
         let workspace = NSWorkspace.shared
-        let resolvedApplication: (url: URL, bundleID: String?)? = {
+        // Bundle ID 优先 (即便 .app 被移动到别的目录也能找到), 其次绝对路径.
+        let resolvedURL: URL? = {
             if let bundleID = payload.bundleID,
                let url = workspace.urlForApplication(withBundleIdentifier: bundleID) {
-                return (url, bundleID)
+                return url
             }
             let url = URL(fileURLWithPath: payload.path)
-            return FileManager.default.fileExists(atPath: url.path) ? (url, nil) : nil
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }()
 
-        guard let resolvedApplication else {
+        guard let resolvedURL else {
             let appName = (payload.path as NSString).lastPathComponent
             Toast.show(
                 String(format: NSLocalizedString("openTargetAppNotFound", comment: ""), appName),
@@ -377,26 +374,46 @@ class ShortcutExecutor {
             return
         }
 
-        let commandPayload = OpenTargetPayload(
-            path: payload.path,
-            bundleID: resolvedApplication.bundleID,
-            arguments: payload.arguments,
-            kind: payload.kind
-        )
-        let command = Self.openApplicationCommand(for: commandPayload, resolvedURL: resolvedApplication.url)
-        let process = Process()
-        process.executableURL = command.executableURL
-        process.arguments = command.arguments
-        process.environment = Self.sanitizedSubprocessEnvironment()
-        do {
-            try process.run()
-        } catch {
-            let appName = resolvedApplication.url.deletingPathExtension().lastPathComponent
-            Toast.show(
-                String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
-                style: .error
-            )
-            NSLog("OpenTarget: launch failed via /usr/bin/open: \(error.localizedDescription)")
+        // 走 NSWorkspace 而不是 Process(/usr/bin/open):
+        // - LaunchServices 路径, 目标 App 由 launchd 启动, 拿到 launchd 的干净 env;
+        //   不会继承 Mos 自身的 DYLD_*/__XPC_DYLD_* 等调试器注入 env vars.
+        // - 这是 OS 层面的隔离, 不依赖 sanitize 黑名单.
+        let appArguments = ArgumentSplitter.split(payload.arguments)
+        let appName = resolvedURL.deletingPathExtension().lastPathComponent
+
+        if #available(macOS 10.15, *) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true   // 已运行则置前 (不重启)
+            configuration.arguments = appArguments
+            workspace.openApplication(at: resolvedURL, configuration: configuration) { _, error in
+                if let error = error {
+                    Toast.show(
+                        String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
+                        style: .error
+                    )
+                    NSLog("OpenTarget: NSWorkspace.openApplication failed: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // macOS 10.13 / 10.14 fallback: legacy launchApplication. 同样走 LaunchServices,
+            // 同样隔离 env. Deprecated 但在现代 macOS 上仍然工作.
+            var configuration: [NSWorkspace.LaunchConfigurationKey: Any] = [:]
+            if !appArguments.isEmpty {
+                configuration[.arguments] = appArguments
+            }
+            do {
+                _ = try workspace.launchApplication(
+                    at: resolvedURL,
+                    options: [.default],
+                    configuration: configuration
+                )
+            } catch {
+                Toast.show(
+                    String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
+                    style: .error
+                )
+                NSLog("OpenTarget: launchApplication (legacy) failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -432,26 +449,6 @@ class ShortcutExecutor {
         // Sanitizer ABI shim
         if key.hasPrefix("LSAN_") || key.hasPrefix("ASAN_") || key.hasPrefix("TSAN_") || key.hasPrefix("UBSAN_") { return true }
         return false
-    }
-
-    static func openApplicationCommand(for payload: OpenTargetPayload, resolvedURL: URL) -> OpenApplicationLaunchCommand {
-        var arguments: [String]
-        if let bundleID = payload.bundleID, !bundleID.isEmpty {
-            arguments = ["-b", bundleID]
-        } else {
-            arguments = [resolvedURL.path]
-        }
-
-        let appArguments = ArgumentSplitter.split(payload.arguments)
-        if !appArguments.isEmpty {
-            arguments.append("--args")
-            arguments.append(contentsOf: appArguments)
-        }
-
-        return OpenApplicationLaunchCommand(
-            executableURL: URL(fileURLWithPath: "/usr/bin/open"),
-            arguments: arguments
-        )
     }
 
     private func runScript(_ payload: OpenTargetPayload) {
