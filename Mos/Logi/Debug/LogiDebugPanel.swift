@@ -1,5 +1,5 @@
 //
-//  LogitechHIDDebugPanel.swift
+//  LogiDebugPanel.swift
 //  Mos
 //  Logitech HID++ 综合调试面板
 //  Created by Mos on 2026/3/16.
@@ -153,10 +153,19 @@ struct HIDPPFeatureActions {
 
 // MARK: - Debug Panel
 
-class LogitechHIDDebugPanel: NSObject {
+class LogiDebugPanel: NSObject {
 
-    static let shared = LogitechHIDDebugPanel()
-    static let logNotification = NSNotification.Name("LogitechHIDDebugLog")
+    #if DEBUG
+    internal static var autosaveNamesSnapshotForTests: [String] {
+        // List of all NSSplitView.autosaveName literals used in this file.
+        // If you add a new autosaveName, you MUST update LogiPersistenceCanaryTests
+        // golden list to match.
+        return ["HIDDebug.FeaturesControls.v3"]
+    }
+    #endif
+
+    static let shared = LogiDebugPanel()
+    static let logNotification = NSNotification.Name("LogiDebugLog")
 
     // MARK: - Layout Constants
 
@@ -212,7 +221,7 @@ class LogitechHIDDebugPanel: NSObject {
 
     // MARK: - State
 
-    private var currentSession: LogitechDeviceSession?
+    private var currentSession: LogiDeviceSession?
     private var logTypeFilter: Set<LogEntryType> = Set(LogEntryType.allCases)
     /// 记录上次已渲染的 filteredLog 行数, 用于 logNotification 走增量 insertRows 而非整表 reload.
     /// 断点条件 (过滤变化 / 清空 / buffer 到达 maxLogLines 触发前置裁剪) 时回落 reloadData.
@@ -233,15 +242,15 @@ class LogitechHIDDebugPanel: NSObject {
     // MARK: - Sidebar Data
 
     private class DeviceNode {
-        let session: LogitechDeviceSession
+        let session: LogiDeviceSession
         var isReceiver: Bool { session.connectionMode == .receiver }
-        init(session: LogitechDeviceSession) { self.session = session }
+        init(session: LogiDeviceSession) { self.session = session }
     }
 
     private class SlotNode {
-        let session: LogitechDeviceSession
+        let session: LogiDeviceSession
         let slot: UInt8
-        init(session: LogitechDeviceSession, slot: UInt8) { self.session = session; self.slot = slot }
+        init(session: LogiDeviceSession, slot: UInt8) { self.session = session; self.slot = slot }
     }
 
     private enum SidebarSelection {
@@ -254,7 +263,7 @@ class LogitechHIDDebugPanel: NSObject {
     // MARK: - Feature/Control Data
 
     private var featureRows: [(index: String, featureId: UInt16, featureIdHex: String, name: String)] = []
-    private var controlRows: [LogitechDeviceSession.ControlInfo] = []
+    private var controlRows: [LogiDeviceSession.ControlInfo] = []
     private var selectedFeatureId: UInt16?
     private var selectedControlCID: UInt16?
 
@@ -1085,7 +1094,7 @@ class LogitechHIDDebugPanel: NSObject {
     }
 
     @objc private func clearLogClicked() {
-        LogitechHIDDebugPanel.logBuffer.removeAll()
+        LogiDebugPanel.logBuffer.removeAll()
         lastFilteredLogCount = 0
         logTableView?.reloadData()
     }
@@ -1095,7 +1104,7 @@ class LogitechHIDDebugPanel: NSObject {
     @objc private func featureActionClicked(_ sender: NSButton) {
         guard let session = currentSession, let featureId = selectedFeatureId else { return }
         guard let featureIdx = session.debugFeatureIndex[featureId] else {
-            LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .warning,
+            LogiDebugPanel.log(device: session.deviceInfo.name, type: .warning,
                                       message: "Feature 0x\(String(format: "%04X", featureId)) not indexed")
             return
         }
@@ -1136,7 +1145,7 @@ class LogitechHIDDebugPanel: NSObject {
         sendDebugPacket(session: session, featureIndex: reprogIdx, functionId: 2, params: params)
     }
 
-    private func sendDebugPacket(session: LogitechDeviceSession, featureIndex: UInt8, functionId: UInt8, params: [UInt8]) {
+    private func sendDebugPacket(session: LogiDeviceSession, featureIndex: UInt8, functionId: UInt8, params: [UInt8]) {
         var report = [UInt8](repeating: 0, count: 20)
         report[0] = 0x11
         report[1] = session.debugDeviceIndex
@@ -1145,11 +1154,11 @@ class LogitechHIDDebugPanel: NSObject {
         for (i, p) in params.prefix(16).enumerated() { report[4 + i] = p }
 
         let hex = report.map { String(format: "%02X", $0) }.joined(separator: " ")
-        LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .tx, message: "TX: \(hex)", rawBytes: report)
+        LogiDebugPanel.log(device: session.deviceInfo.name, type: .tx, message: "TX: \(hex)", rawBytes: report)
 
         let result = IOHIDDeviceSetReport(session.hidDevice, kIOHIDReportTypeOutput, CFIndex(report[0]), report, report.count)
         if result != kIOReturnSuccess {
-            LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .error,
+            LogiDebugPanel.log(device: session.deviceInfo.name, type: .error,
                                       message: "IOHIDDeviceSetReport failed: \(String(format: "0x%08X", result))")
         }
     }
@@ -1176,7 +1185,7 @@ class LogitechHIDDebugPanel: NSObject {
         let filtered = filteredLogEntries()
         guard row >= 0, row < filtered.count else { return }
         let bufferIdx = filtered[row].0
-        LogitechHIDDebugPanel.logBuffer[bufferIdx].isExpanded.toggle()
+        LogiDebugPanel.logBuffer[bufferIdx].isExpanded.toggle()
         logTableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
         logTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
     }
@@ -1193,7 +1202,7 @@ class LogitechHIDDebugPanel: NSObject {
         panel.beginSheetModal(for: win) { response in
             guard response == .OK, let url = panel.url else { return }
             var output = ""
-            for entry in LogitechHIDDebugPanel.logBuffer {
+            for entry in LogiDebugPanel.logBuffer {
                 let dev = entry.deviceName.isEmpty ? "" : "[\(entry.deviceName)] "
                 output += "[\(entry.timestamp)] \(dev)[\(entry.type.rawValue)] \(entry.message)\n"
                 if let decoded = entry.decoded { output += "  > \(decoded)\n" }
@@ -1208,14 +1217,14 @@ class LogitechHIDDebugPanel: NSObject {
     @objc private func sendRawClicked() {
         guard let session = currentSession else { return }
         guard session.debugDeviceOpened else {
-            LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .warning, message: "Device not opened")
+            LogiDebugPanel.log(device: session.deviceInfo.name, type: .warning, message: "Device not opened")
             return
         }
         let hexStr = rawInputField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !hexStr.isEmpty else { return }
         let bytes = hexStr.split(separator: " ").compactMap { UInt8($0, radix: 16) }
         guard !bytes.isEmpty else {
-            LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .warning, message: "Invalid hex input")
+            LogiDebugPanel.log(device: session.deviceInfo.name, type: .warning, message: "Invalid hex input")
             return
         }
 
@@ -1227,17 +1236,17 @@ class LogitechHIDDebugPanel: NSObject {
         for (i, b) in srcBytes.prefix(reportLen - 1).enumerated() { report[1 + i] = b }
 
         let hex = report.map { String(format: "%02X", $0) }.joined(separator: " ")
-        LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .tx, message: "TX: \(hex)", rawBytes: report)
+        LogiDebugPanel.log(device: session.deviceInfo.name, type: .tx, message: "TX: \(hex)", rawBytes: report)
 
         let result = IOHIDDeviceSetReport(session.hidDevice, kIOHIDReportTypeOutput, CFIndex(report[0]), report, report.count)
         if result != kIOReturnSuccess {
-            LogitechHIDDebugPanel.log(device: session.deviceInfo.name, type: .error,
+            LogiDebugPanel.log(device: session.deviceInfo.name, type: .error,
                                       message: "IOHIDDeviceSetReport failed: \(String(format: "0x%08X", result))")
         }
     }
 
     private func filteredLogEntries() -> [(Int, LogEntry)] {
-        return LogitechHIDDebugPanel.logBuffer.enumerated().filter { logTypeFilter.contains($0.element.type) }
+        return LogiDebugPanel.logBuffer.enumerated().filter { logTypeFilter.contains($0.element.type) }
     }
 
     // MARK: - Refresh
@@ -1305,7 +1314,7 @@ class LogitechHIDDebugPanel: NSObject {
     }
 
     private func refreshSidebar() {
-        let sessions = LogitechHIDManager.shared.activeSessions
+        let sessions = LogiSessionManager.shared.activeSessions
         let previousSessionIDs = Set(deviceNodes.map { ObjectIdentifier($0.session) })
         let expandedSessionIDs: Set<ObjectIdentifier>
         let selectedItem = currentSidebarSelection()
@@ -1386,7 +1395,7 @@ class LogitechHIDDebugPanel: NSObject {
 
     /// Receiver session 在指向某个 slot peripheral 时, 返回 "<peripheral name> (0xWPID)";
     /// 否则返回 "--".
-    private func targetDisplay(for session: LogitechDeviceSession) -> String {
+    private func targetDisplay(for session: LogiDeviceSession) -> String {
         guard session.connectionMode == .receiver,
               session.debugDeviceIndex >= 1, session.debugDeviceIndex <= 6 else {
             return "--"
@@ -1466,7 +1475,7 @@ class LogitechHIDDebugPanel: NSObject {
         stopObserving()
         lastFilteredLogCount = filteredLogEntries().count
         logObserver = NotificationCenter.default.addObserver(
-            forName: LogitechHIDDebugPanel.logNotification, object: nil, queue: .main
+            forName: LogiDebugPanel.logNotification, object: nil, queue: .main
         ) { [weak self] notification in
             guard let self = self, let table = self.logTableView else { return }
             // 增量更新: 单条追加走 insertRows (O(1) 视图工作); 过滤掉的条目静默跳过;
@@ -1498,10 +1507,10 @@ class LogitechHIDDebugPanel: NSObject {
             }
         }
         sessionObserver = NotificationCenter.default.addObserver(
-            forName: LogitechHIDManager.sessionChangedNotification, object: nil, queue: .main
+            forName: LogiSessionManager.sessionChangedNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.refreshAll() }
         reportingCompleteObserver = NotificationCenter.default.addObserver(
-            forName: LogitechHIDManager.reportingQueryDidCompleteNotification,
+            forName: LogiSessionManager.reportingQueryDidCompleteNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             // Sidebar 状态圆点会从 Initializing 切到 Ready, 需要跟随 reprog init 完成一起刷新.
@@ -1509,7 +1518,7 @@ class LogitechHIDDebugPanel: NSObject {
             self?.refreshRightPanels()
         }
         discoveryStateObserver = NotificationCenter.default.addObserver(
-            forName: LogitechHIDManager.discoveryStateDidChangeNotification,
+            forName: LogiSessionManager.discoveryStateDidChangeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             // Discovery 进/出 flight: 刷 header (spinner 显隐) + sidebar (slot 行 spinner).
@@ -1689,7 +1698,7 @@ class LogitechHIDDebugPanel: NSObject {
 
 // MARK: - NSOutlineViewDataSource & Delegate
 
-extension LogitechHIDDebugPanel: NSOutlineViewDataSource {
+extension LogiDebugPanel: NSOutlineViewDataSource {
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         if item == nil { return deviceNodes.count }
         if let node = item as? DeviceNode, node.isReceiver {
@@ -1712,7 +1721,7 @@ extension LogitechHIDDebugPanel: NSOutlineViewDataSource {
     }
 }
 
-extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
+extension LogiDebugPanel: NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
         // Device 行两行布局, slot 行保持单行.
         return (item is DeviceNode) ? Self.deviceRowHeight : 22
@@ -1928,7 +1937,7 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
         }
     }
 
-    private func sidebarStatus(for session: LogitechDeviceSession) -> SidebarRowStatus {
+    private func sidebarStatus(for session: LogiDeviceSession) -> SidebarRowStatus {
         // 非候选接口一律记为 Observer (OS 看得到, Mos 不通信).
         if !session.isHIDPPCandidate { return .observer }
         // handshakeComplete 覆盖所有终态 (receiver: ping 完成; direct: discovery 走到终点).
@@ -1937,7 +1946,7 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
 
     /// HID 接口的"角色" (同一设备暴露多条 HID 接口时用于区分).
     /// Mouse / Keyboard / Consumer Control / Pointer / System Control / Vendor-specific
-    private func interfaceRole(for session: LogitechDeviceSession) -> String {
+    private func interfaceRole(for session: LogiDeviceSession) -> String {
         switch (session.usagePage, session.usage) {
         case (0x0001, 0x0002): return "Mouse"
         case (0x0001, 0x0006): return "Keyboard"
@@ -1953,7 +1962,7 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
     private func renderDeviceRowPrimary(node: DeviceNode) -> NSAttributedString {
         let session = node.session
         let primaryName: String = node.isReceiver
-            ? LogitechReceiverRegistry.displayName(forPID: session.deviceInfo.productId)
+            ? LogiReceiverCatalog.displayName(forPID: session.deviceInfo.productId)
             : session.deviceInfo.name
         return NSAttributedString(
             string: primaryName,
@@ -2003,7 +2012,7 @@ extension LogitechHIDDebugPanel: NSOutlineViewDelegate {
 
 // MARK: - NSTableViewDataSource & Delegate
 
-extension LogitechHIDDebugPanel: NSTableViewDataSource {
+extension LogiDebugPanel: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
         switch tableView.tag {
         case 200: return featureRows.count
@@ -2014,7 +2023,7 @@ extension LogitechHIDDebugPanel: NSTableViewDataSource {
     }
 }
 
-extension LogitechHIDDebugPanel: NSSplitViewDelegate {
+extension LogiDebugPanel: NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         // Features column min width
         return 180
@@ -2026,7 +2035,7 @@ extension LogitechHIDDebugPanel: NSSplitViewDelegate {
     }
 }
 
-extension LogitechHIDDebugPanel: NSTableViewDelegate {
+extension LogiDebugPanel: NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch tableView.tag {
         case 200: return featureCell(tableColumn: tableColumn, row: row)
@@ -2092,33 +2101,38 @@ extension LogitechHIDDebugPanel: NSTableViewDelegate {
         // 真正的第三方冲突 = 设备侧非零 且 不在 Mos 的 divertedCIDs 集合里.
         // 同一 CID 若被 Mos 与第三方同时 divert, 此处偏向 Mos 语义: ACTIONS 显示 Undivert 时
         // Status 也显示 DVRT, 不会再出现 "按钮是 Undivert 但标签却是 3rd-DVRT" 的隐藏矛盾.
-        let isMosDivert = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
-        let isForeignDivert = ctrl.reportingFlags != 0 && !isMosDivert
-        // self-remap (targetCID == cid) 是 Logitech 默认的 identity mapping, 不算 remap
-        let isRemapped = ctrl.targetCID != 0 && ctrl.targetCID != ctrl.cid
+        let mosOwns = currentSession?.debugDivertedCIDs.contains(ctrl.cid) ?? false
+        let status = LogiConflictDetector.status(
+            reportingFlags: ctrl.reportingFlags,
+            targetCID: ctrl.targetCID,
+            cid: ctrl.cid,
+            reportingQueried: ctrl.reportingQueried,
+            mosOwnsDivert: mosOwns
+        )
 
         switch tableColumn?.identifier.rawValue {
         case "cCid": label.stringValue = String(format: "0x%04X", ctrl.cid)
-        case "cName": label.stringValue = LogitechCIDRegistry.name(forCID: ctrl.cid)
+        case "cName": label.stringValue = LogiCIDDirectory.name(forCID: ctrl.cid)
         case "cFlags":
             label.stringValue = HIDPPInfo.flagsDescription(ctrl.flags)
             label.textColor = .secondaryLabelColor
         case "cStatus":
-            if isForeignDivert {
-                // 第三方 tmpDivert / persistDivert -> 冲突信号, 红色
+            switch status {
+            case .foreignDivert:
                 label.stringValue = "3rd-DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.3, alpha: 0.9)
-            } else if isRemapped {
-                // 第三方 remap -> 黄色
+            case .remapped:
                 label.stringValue = "REMAP"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.8, blue: 0.2, alpha: 0.8)
-            } else if isMosDivert {
-                // Mos 自己 divert -> 橘色
+            case .mosOwned:
                 label.stringValue = "DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
-            } else {
+            case .clear:
                 label.stringValue = "\u{25CF}"
                 label.textColor = NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0)
+            case .unknown:
+                label.stringValue = "?"
+                label.textColor = .tertiaryLabelColor
             }
         default: break
         }

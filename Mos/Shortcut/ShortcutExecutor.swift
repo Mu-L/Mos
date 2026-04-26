@@ -297,11 +297,11 @@ class ShortcutExecutor {
     private func executeLogiAction(_ name: String) {
         switch name {
         case "logiSmartShiftToggle":
-            LogitechHIDManager.shared.executeSmartShiftToggle()
+            LogiCenter.shared.executeSmartShiftToggle()
         case "logiDPICycleUp":
-            LogitechHIDManager.shared.executeDPICycle(direction: .up)
+            LogiCenter.shared.executeDPICycle(direction: .up)
         case "logiDPICycleDown":
-            LogitechHIDManager.shared.executeDPICycle(direction: .down)
+            LogiCenter.shared.executeDPICycle(direction: .down)
         default:
             break
         }

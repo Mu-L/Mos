@@ -1,5 +1,5 @@
 //
-//  LogitechHIDManager.swift
+//  LogiSessionManager.swift
 //  Mos
 //  Logitech HID 设备管理器 - 通过 IOKit 枚举和监控 Logitech 设备
 //  Created by Mos on 2026/3/16.
@@ -10,34 +10,41 @@ import Foundation
 import IOKit
 import IOKit.hid
 
-class LogitechHIDManager {
-    static let shared = LogitechHIDManager()
-    init() { NSLog("Module initialized: LogitechHIDManager") }
+/// Cycle direction for DPI / SmartShift toggle helpers.
+public enum Direction { case up, down }
+
+/// Internal manager that orchestrates Logi HID device sessions. The only
+/// supported public surface is `LogiCenter` (Step 5's lint script enforces
+/// this against the rest of the app). Tests in `MosTests/Logi*Tests.swift`
+/// reference internal Logi symbols by design.
+internal class LogiSessionManager {
+    internal static let shared = LogiSessionManager()
+    init() { NSLog("Module initialized: LogiSessionManager") }
 
     // MARK: - Constants
     static let logitechVendorId: Int = 0x046D
-    static let buttonEventNotification = NSNotification.Name("LogitechHIDButtonEvent")
+    static let buttonEventNotification = NSNotification.Name("LogiButtonEvent")
 
     // MARK: - State
     private var hidManager: IOHIDManager?
-    private var sessions: [IOHIDDevice: LogitechDeviceSession] = [:]
+    private var sessions: [IOHIDDevice: LogiDeviceSession] = [:]
     private(set) var isActive = false
 
     // MARK: - Lifecycle
 
     func start() {
         guard !isActive else { return }
-        LogitechHIDDebugPanel.log("[LogitechHID] Starting")
+        LogiDebugPanel.log("[LogitechHID] Starting")
 
         hidManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         guard let manager = hidManager else {
-            LogitechHIDDebugPanel.log("[LogitechHID] Failed to create IOHIDManager")
+            LogiDebugPanel.log("[LogitechHID] Failed to create IOHIDManager")
             return
         }
 
         // 只匹配 Logitech 设备
         let matchDict: [String: Any] = [
-            kIOHIDVendorIDKey as String: LogitechHIDManager.logitechVendorId
+            kIOHIDVendorIDKey as String: LogiSessionManager.logitechVendorId
         ]
         IOHIDManagerSetDeviceMatching(manager, matchDict as CFDictionary)
 
@@ -51,17 +58,17 @@ class LogitechHIDManager {
 
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         if result != kIOReturnSuccess {
-            LogitechHIDDebugPanel.log("[LogitechHID] Failed to open IOHIDManager: \(String(format: "0x%08x", result))")
+            LogiDebugPanel.log("[LogitechHID] Failed to open IOHIDManager: \(String(format: "0x%08x", result))")
             return
         }
 
         isActive = true
-        LogitechHIDDebugPanel.log("[LogitechHID] Started")
+        LogiDebugPanel.log("[LogitechHID] Started")
     }
 
     func stop() {
         guard isActive else { return }
-        LogitechHIDDebugPanel.log("[LogitechHID] Stopping")
+        LogiDebugPanel.log("[LogitechHID] Stopping")
 
         // 清理所有设备会话
         for (_, session) in sessions {
@@ -77,20 +84,20 @@ class LogitechHIDManager {
         isActive = false
         // sessions 被清空后重算一次, 把 lastKnownBusy 归位并让 UI 同步关闭 spinner.
         recomputeAndNotifyActivityState()
-        LogitechHIDDebugPanel.log("[LogitechHID] Stopped")
+        LogiDebugPanel.log("[LogitechHID] Stopped")
     }
 
     // MARK: - Device Callbacks (C function pointers)
 
     private static let deviceMatchedCallback: IOHIDDeviceCallback = { context, result, sender, device in
         guard let context = context else { return }
-        let manager = Unmanaged<LogitechHIDManager>.fromOpaque(context).takeUnretainedValue()
+        let manager = Unmanaged<LogiSessionManager>.fromOpaque(context).takeUnretainedValue()
         manager.deviceConnected(device)
     }
 
     private static let deviceRemovedCallback: IOHIDDeviceCallback = { context, result, sender, device in
         guard let context = context else { return }
-        let manager = Unmanaged<LogitechHIDManager>.fromOpaque(context).takeUnretainedValue()
+        let manager = Unmanaged<LogiSessionManager>.fromOpaque(context).takeUnretainedValue()
         manager.deviceDisconnected(device)
     }
 
@@ -102,13 +109,13 @@ class LogitechHIDManager {
         let productId = IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int ?? 0
         let productName = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "Unknown"
 
-        LogitechHIDDebugPanel.log("[LogitechHID] Device connected: \(productName) (VID: \(String(format: "0x%04X", vendorId)), PID: \(String(format: "0x%04X", productId)))")
+        LogiDebugPanel.log("[LogitechHID] Device connected: \(productName) (VID: \(String(format: "0x%04X", vendorId)), PID: \(String(format: "0x%04X", productId)))")
 
         // 避免重复会话
         guard sessions[device] == nil else { return }
 
         // 创建会话
-        let session = LogitechDeviceSession(hidDevice: device)
+        let session = LogiDeviceSession(hidDevice: device)
         sessions[device] = session
         session.setup()
         NotificationCenter.default.post(name: Self.sessionChangedNotification, object: nil)
@@ -116,7 +123,7 @@ class LogitechHIDManager {
 
     private func deviceDisconnected(_ device: IOHIDDevice) {
         guard let session = sessions.removeValue(forKey: device) else { return }
-        LogitechHIDDebugPanel.log("[LogitechHID] Device disconnected: \(session.deviceInfo.name)")
+        LogiDebugPanel.log("[LogitechHID] Device disconnected: \(session.deviceInfo.name)")
         session.teardown()
         NotificationCenter.default.post(name: Self.sessionChangedNotification, object: nil)
         // 断开的 session 可能曾处于 busy 状态, 重新聚合一次防止 spinner 卡住.
@@ -131,21 +138,25 @@ class LogitechHIDManager {
     }
 
     /// Debug: 暴露活跃的设备会话
-    var activeSessions: [LogitechDeviceSession] {
+    var activeSessions: [LogiDeviceSession] {
         return Array(sessions.values)
     }
 
-    static let sessionChangedNotification = NSNotification.Name("LogitechHIDSessionChanged")
+    static let sessionChangedNotification = NSNotification.Name("LogiSessionChanged")
 
     /// 某个 session 的 discovery 握手流程开始或结束时触发; UI 据此切换 spinner.
-    static let discoveryStateDidChangeNotification = NSNotification.Name("LogitechHIDDiscoveryStateDidChange")
+    static let discoveryStateDidChangeNotification = NSNotification.Name("LogiDiscoveryStateDidChange")
 
     /// 某个 session 完成 reporting 查询后触发, UI 可据此刷新冲突指示.
-    static let reportingQueryDidCompleteNotification = NSNotification.Name("LogitechHIDReportingQueryDidComplete")
+    static let reportingQueryDidCompleteNotification = NSNotification.Name("LogiReportingQueryDidComplete")
 
     /// 任一 HID++ session 的活动状态 (discovery / reporting query) 发生变化时触发;
     /// 聚合后只在 "全局是否忙碌" 翻转的瞬间 post, UI 订阅后用来驱动 activity spinner.
-    static let activityStateDidChangeNotification = NSNotification.Name("LogitechHIDActivityStateDidChange")
+    static let activityStateDidChangeNotification = NSNotification.Name("LogiActivityStateDidChange")
+
+    /// 冲突状态变化通知; Step 4/5 会在 reporting query 完成等位置 post 此通知.
+    /// Step 2 仅声明命名,不在任何位置 post.
+    static let conflictChangedNotification = NSNotification.Name("LogiConflictChanged")
 
     // MARK: - Activity State Aggregation
 
@@ -190,7 +201,7 @@ class LogitechHIDManager {
     /// 优化: 没有任何 Logi 绑定时没人会看到冲突图标,直接跳过以省去无谓的 HID++ 往返
     /// (对没 Logi 鼠标的用户自动生效, 因为此时 sessions 也必然为空).
     func refreshReportingStatesIfNeeded() {
-        guard hasAnyLogitechBinding else { return }
+        if LogiCenter.shared.registry.aggregatedCacheIsEmpty { return }
         if let last = lastReportingRefresh,
            Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
         lastReportingRefresh = Date()
@@ -199,26 +210,19 @@ class LogitechHIDManager {
         }
     }
 
-    /// 判断 Options.buttons.binding 中是否存在至少一个 Logi 按键触发器.
-    /// 检测 UI 仅在这种情况下有展示价值, 作为 refresh 的 gate.
-    private var hasAnyLogitechBinding: Bool {
-        return Options.shared.buttons.binding.contains { binding in
-            binding.triggerEvent.type == .mouse &&
-                LogitechCIDRegistry.isLogitechCode(binding.triggerEvent.code)
-        }
-    }
-
     /// 查询某 Logi MosCode 当前是否被第三方 (如 Logitech Options+) 接管.
     /// 未连接设备 / 未完成 reporting 查询 / 非 Logi code -> unknown.
-    func conflictStatus(forMosCode mosCode: UInt16) -> LogitechConflictDetector.Status {
-        guard let cid = LogitechCIDRegistry.toCID(mosCode) else { return .unknown }
+    func conflictStatus(forMosCode mosCode: UInt16) -> ConflictStatus {
+        guard let cid = LogiCIDDirectory.toCID(mosCode) else { return .unknown }
         for session in sessions.values where session.isHIDPPCandidate {
             if let control = session.control(forCID: cid) {
-                return LogitechConflictDetector.status(
+                let mosOwns = session.debugDivertedCIDs.contains(cid)
+                return LogiConflictDetector.status(
                     reportingFlags: control.reportingFlags,
                     targetCID: control.targetCID,
                     cid: cid,
-                    reportingQueried: control.reportingQueried
+                    reportingQueried: control.reportingQueried,
+                    mosOwnsDivert: mosOwns
                 )
             }
         }
@@ -226,13 +230,6 @@ class LogitechHIDManager {
     }
 
     // MARK: - Divert Control
-
-    /// 绑定变更后调用: 同步所有会话的 divert 状态
-    func syncDivertWithBindings() {
-        for (_, session) in sessions where session.isHIDPPCandidate {
-            session.syncDivertWithBindings()
-        }
-    }
 
     /// 录制模式标志: 录制期间跳过动作执行, 只转发事件给 KeyRecorder
     private(set) var isRecording = false
@@ -255,10 +252,8 @@ class LogitechHIDManager {
 
     // MARK: - Logi Action Execution
 
-    enum DPICycleDirection { case up, down }
-
     /// 获取最佳活跃 session (优先已完成 init 的, 其次 BLE)
-    private var primarySession: LogitechDeviceSession? {
+    private var primarySession: LogiDeviceSession? {
         // 优先: 已完成 init 的 session
         if let ready = sessions.values.first(where: { $0.isHIDPPCandidate && $0.debugReprogInitComplete }) {
             return ready
@@ -278,7 +273,7 @@ class LogitechHIDManager {
     }
 
     /// DPI 循环
-    func executeDPICycle(direction: DPICycleDirection) {
+    func executeDPICycle(direction: Direction) {
         guard let session = primarySession else { return }
         session.executeDPICycle(direction: direction)
     }

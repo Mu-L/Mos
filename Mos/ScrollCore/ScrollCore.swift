@@ -196,7 +196,7 @@ class ScrollCore {
 
     /// 处理来自 Logitech HID++ 的按键事件, 匹配 dash/toggle/block 滚动热键
     @discardableResult
-    func handleScrollHotkeyFromHIDPlusPlus(code: UInt16, isDown: Bool) -> Bool {
+    func handleScrollHotkey(code: UInt16, isDown: Bool) -> Bool {
         // Key-up: 按跟踪的 code 清除状态 (不依赖当前 app 配置, 防止焦点切换导致状态卡死)
         if !isDown {
             var matched = false
