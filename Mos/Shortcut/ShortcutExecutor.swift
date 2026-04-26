@@ -325,10 +325,34 @@ class ShortcutExecutor {
     // MARK: - Open Target Actions
 
     private func executeOpenTarget(_ payload: OpenTargetPayload) {
-        if payload.isApplication {
-            launchApplication(payload)
-        } else {
-            runScript(payload)
+        switch payload.kind {
+        case .application: launchApplication(payload)
+        case .script:      runScript(payload)
+        case .file:        openFile(payload)
+        }
+    }
+
+    /// 用系统默认 app 打开任意文件 (PNG / PDF / 文本 / etc.).
+    /// NSWorkspace.open(_:) 不支持参数, payload.arguments 在此忽略.
+    private func openFile(_ payload: OpenTargetPayload) {
+        let url = URL(fileURLWithPath: payload.path)
+        let fileName = url.lastPathComponent
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Toast.show(
+                String(format: NSLocalizedString("openTargetFileNotFound", comment: ""), fileName),
+                style: .error
+            )
+            NSLog("OpenTarget: file not found: \(payload.path)")
+            return
+        }
+
+        if !NSWorkspace.shared.open(url) {
+            Toast.show(
+                String(format: NSLocalizedString("openTargetFileFailed", comment: ""), fileName),
+                style: .error
+            )
+            NSLog("OpenTarget: NSWorkspace.open returned false for: \(payload.path)")
         }
     }
 
@@ -357,7 +381,7 @@ class ShortcutExecutor {
             path: payload.path,
             bundleID: resolvedApplication.bundleID,
             arguments: payload.arguments,
-            isApplication: payload.isApplication
+            kind: payload.kind
         )
         let command = Self.openApplicationCommand(for: commandPayload, resolvedURL: resolvedApplication.url)
         let process = Process()

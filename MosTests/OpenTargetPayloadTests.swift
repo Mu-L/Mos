@@ -10,14 +10,14 @@ final class OpenTargetPayloadTests: XCTestCase {
             path: "/Applications/Safari.app",
             bundleID: "com.apple.Safari",
             arguments: "https://example.com",
-            isApplication: true
+            kind: .application
         )
         let data = try! JSONEncoder().encode(original)
         let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: data)
         XCTAssertEqual(decoded.path, "/Applications/Safari.app")
         XCTAssertEqual(decoded.bundleID, "com.apple.Safari")
         XCTAssertEqual(decoded.arguments, "https://example.com")
-        XCTAssertTrue(decoded.isApplication)
+        XCTAssertEqual(decoded.kind, .application)
     }
 
     func testCodableRoundtrip_script() {
@@ -25,33 +25,66 @@ final class OpenTargetPayloadTests: XCTestCase {
             path: "/usr/local/bin/deploy.sh",
             bundleID: nil,
             arguments: "--port=3000",
-            isApplication: false
+            kind: .script
         )
         let data = try! JSONEncoder().encode(original)
         let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: data)
         XCTAssertEqual(decoded.path, "/usr/local/bin/deploy.sh")
         XCTAssertNil(decoded.bundleID)
-        XCTAssertFalse(decoded.isApplication)
+        XCTAssertEqual(decoded.kind, .script)
+    }
+
+    func testCodableRoundtrip_file() {
+        let original = OpenTargetPayload(
+            path: "/Users/x/photo.png",
+            bundleID: nil,
+            arguments: "",
+            kind: .file
+        )
+        let data = try! JSONEncoder().encode(original)
+        let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: data)
+        XCTAssertEqual(decoded.path, "/Users/x/photo.png")
+        XCTAssertEqual(decoded.kind, .file)
+    }
+
+    func testCodableLegacy_isApplicationTrue_mapsToApplication() {
+        let legacyJSON = """
+        {"path":"/x.app","bundleID":"com.x","arguments":"","isApplication":true}
+        """.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: legacyJSON)
+        XCTAssertEqual(decoded.kind, .application)
+    }
+
+    func testCodableLegacy_isApplicationFalse_mapsToScript() {
+        let legacyJSON = """
+        {"path":"/run.sh","bundleID":null,"arguments":"","isApplication":false}
+        """.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: legacyJSON)
+        XCTAssertEqual(decoded.kind, .script)
     }
 
     func testEquatable() {
-        let a = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", isApplication: false)
-        let b = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", isApplication: false)
-        let c = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "x", isApplication: false)
+        let a = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .file)
+        let b = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .file)
+        let c = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "x", kind: .file)
+        let d = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .script)
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
+        XCTAssertNotEqual(a, d)
     }
 
     func testJSONShape_isFlatAndReadable() {
-        // Must produce keys path / bundleID / arguments / isApplication directly, no _0 wrapping.
-        let payload = OpenTargetPayload(path: "/x", bundleID: "y", arguments: "z", isApplication: true)
+        // Must produce keys path / bundleID / arguments / kind directly, no _0 wrapping.
+        // Must NOT write legacy isApplication anymore (avoid double-source-of-truth).
+        let payload = OpenTargetPayload(path: "/x", bundleID: "y", arguments: "z", kind: .application)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let json = String(data: try! encoder.encode(payload), encoding: .utf8)!
         XCTAssertTrue(json.contains("\"path\":\"\\/x\""))
         XCTAssertTrue(json.contains("\"bundleID\":\"y\""))
         XCTAssertTrue(json.contains("\"arguments\":\"z\""))
-        XCTAssertTrue(json.contains("\"isApplication\":true"))
+        XCTAssertTrue(json.contains("\"kind\":\"application\""))
+        XCTAssertFalse(json.contains("isApplication"))
         XCTAssertFalse(json.contains("_0"))
     }
 

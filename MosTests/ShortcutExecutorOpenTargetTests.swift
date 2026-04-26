@@ -11,7 +11,7 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
     }
 
     func testResolveAction_openTargetSentinel_returnsOpenTargetCase() {
-        let payload = OpenTargetPayload(path: "/Applications/Safari.app", bundleID: "com.apple.Safari", arguments: "", isApplication: true)
+        let payload = OpenTargetPayload(path: "/Applications/Safari.app", bundleID: "com.apple.Safari", arguments: "", kind: .application)
         let binding = makeOpenTargetBinding(payload: payload)
         let executor = ShortcutExecutor()
 
@@ -66,7 +66,7 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
     }
 
     func testExecutionMode_openTarget_isTrigger() {
-        let payload = OpenTargetPayload(path: "/x.app", bundleID: nil, arguments: "", isApplication: true)
+        let payload = OpenTargetPayload(path: "/x.app", bundleID: nil, arguments: "", kind: .application)
         let action: ResolvedAction = .openTarget(payload: payload)
         XCTAssertEqual(action.executionMode, .trigger)
     }
@@ -82,7 +82,7 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
             path: "/System/Applications/FindMy.app",
             bundleID: "com.apple.findmy",
             arguments: "",
-            isApplication: true
+            kind: .application
         )
         let url = URL(fileURLWithPath: "/System/Applications/FindMy.app")
 
@@ -97,7 +97,7 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
             path: "/Applications/Safari.app",
             bundleID: "com.apple.Safari",
             arguments: "https://example.com \"with space\"",
-            isApplication: true
+            kind: .application
         )
         let url = URL(fileURLWithPath: "/Applications/Safari.app")
 

@@ -314,7 +314,7 @@ final class ButtonBindingTests: XCTestCase {
             path: "/Applications/Safari.app",
             bundleID: "com.apple.Safari",
             arguments: "",
-            isApplication: true
+            kind: .application
         )
         let presentation = ActionDisplayResolver().resolve(
             shortcut: nil,
@@ -332,7 +332,7 @@ final class ButtonBindingTests: XCTestCase {
             path: "/totally-fake-path-do-not-exist.app",
             bundleID: "com.does.not.exist",
             arguments: "",
-            isApplication: true
+            kind: .application
         )
         let presentation = ActionDisplayResolver().resolve(
             shortcut: nil,
@@ -628,7 +628,7 @@ final class ButtonBindingTests: XCTestCase {
             path: "/Applications/Safari.app",
             bundleID: "com.apple.Safari",
             arguments: "",
-            isApplication: true
+            kind: .application
         )
         let binding = ButtonBinding(
             triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
@@ -643,7 +643,7 @@ final class ButtonBindingTests: XCTestCase {
             path: "/Applications/Safari.app",
             bundleID: "com.apple.Safari",
             arguments: "https://example.com",
-            isApplication: true
+            kind: .application
         )
         let original = ButtonBinding(
             triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
@@ -681,8 +681,8 @@ final class ButtonBindingTests: XCTestCase {
     }
 
     func testEquatable_distinguishesByOpenTarget() {
-        let payloadA = OpenTargetPayload(path: "/a.app", bundleID: nil, arguments: "", isApplication: true)
-        let payloadB = OpenTargetPayload(path: "/b.app", bundleID: nil, arguments: "", isApplication: true)
+        let payloadA = OpenTargetPayload(path: "/a.app", bundleID: nil, arguments: "", kind: .application)
+        let payloadB = OpenTargetPayload(path: "/b.app", bundleID: nil, arguments: "", kind: .application)
         let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
         let id = UUID()
         let createdAt = Date(timeIntervalSince1970: 0)

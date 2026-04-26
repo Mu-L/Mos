@@ -7283,13 +7283,47 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose an app or script to open"
+            "value" : "Choose an app, script, or any file to open"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择要打开的应用或脚本"
+            "value" : "选择要打开的应用、脚本或文件"
+          }
+        }
+      }
+    },
+    "openTargetFileNotFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File \"%@\" not found"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到文件 \"%@\""
+          }
+        }
+      }
+    },
+    "openTargetFileFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to open \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开 \"%@\""
           }
         }
       }

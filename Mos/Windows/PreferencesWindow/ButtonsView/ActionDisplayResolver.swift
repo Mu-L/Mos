@@ -100,7 +100,7 @@ struct ActionDisplayResolver {
         let title: String
         let icon: NSImage?
         if let url = resolvedURL {
-            if payload.isApplication, let bundle = Bundle(url: url) {
+            if payload.kind == .application, let bundle = Bundle(url: url) {
                 title = bundle.localizedDisplayName
                     ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String
                     ?? bundle.infoDictionary?["CFBundleName"] as? String

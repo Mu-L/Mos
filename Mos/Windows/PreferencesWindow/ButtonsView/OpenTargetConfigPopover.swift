@@ -19,7 +19,7 @@ final class OpenTargetConfigPopover: NSObject {
     // Captured selection
     private var selectedPath: String?
     private var selectedBundleID: String?
-    private var selectedIsApplication: Bool = false
+    private var selectedKind: OpenTargetKind = .file
 
     // Views
     private weak var fileSlot: FileSlotView?
@@ -37,7 +37,7 @@ final class OpenTargetConfigPopover: NSObject {
     private struct PickedFile {
         let path: String
         let bundleID: String?
-        let isApplication: Bool
+        let kind: OpenTargetKind
     }
 
     // MARK: - Show
@@ -47,7 +47,7 @@ final class OpenTargetConfigPopover: NSObject {
         self.existingPayload = existing
         self.selectedPath = existing?.path
         self.selectedBundleID = existing?.bundleID
-        self.selectedIsApplication = existing?.isApplication ?? false
+        self.selectedKind = existing?.kind ?? .file
 
         let popover = NSPopover()
         popover.behavior = .applicationDefined  // 不自动关闭, 必须显式 close
@@ -63,7 +63,7 @@ final class OpenTargetConfigPopover: NSObject {
             staleBanner?.isHidden = false
             selectedPath = nil
             selectedBundleID = nil
-            selectedIsApplication = false
+            selectedKind = .file
             fileSlot?.setState(.empty, animated: false)
             doneButton?.isEnabled = false
             setArgumentsVisible(false, animated: false)
@@ -75,7 +75,7 @@ final class OpenTargetConfigPopover: NSObject {
 
     private func isCurrentSelectionResolvable() -> Bool {
         guard let path = selectedPath else { return false }
-        if selectedIsApplication, let bundleID = selectedBundleID,
+        if selectedKind == .application, let bundleID = selectedBundleID,
            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil {
             return true
         }
@@ -252,19 +252,29 @@ final class OpenTargetConfigPopover: NSObject {
     }
 
     /// 解析任意文件 URL 为待保存的字段集; 返回 nil 表示路径无效.
+    /// 推断规则:
+    /// - .app 扩展名 → .application (同时取 bundleID)
+    /// - 可执行位 set 的非 .app → .script (Process 运行)
+    /// - 其它 → .file (NSWorkspace.open 用默认 app 打开)
     private static func resolvePickedFile(at url: URL) -> PickedFile? {
         var isDirectory: ObjCBool = false
         let isApp = url.pathExtension.lowercased() == "app"
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               !isDirectory.boolValue || isApp else { return nil }
-        let bundleID = isApp ? Bundle(url: url)?.bundleIdentifier : nil
-        return PickedFile(path: url.path, bundleID: bundleID, isApplication: isApp)
+        if isApp {
+            let bundleID = Bundle(url: url)?.bundleIdentifier
+            return PickedFile(path: url.path, bundleID: bundleID, kind: .application)
+        }
+        if FileManager.default.isExecutableFile(atPath: url.path) {
+            return PickedFile(path: url.path, bundleID: nil, kind: .script)
+        }
+        return PickedFile(path: url.path, bundleID: nil, kind: .file)
     }
 
     private func applyPickedFile(_ picked: PickedFile) {
         selectedPath = picked.path
         selectedBundleID = picked.bundleID
-        selectedIsApplication = picked.isApplication
+        selectedKind = picked.kind
         staleBanner?.isHidden = true
         applyFilledStateForCurrentSelection(animated: true)
     }
@@ -280,7 +290,7 @@ final class OpenTargetConfigPopover: NSObject {
         let workspace = NSWorkspace.shared
         let icon = workspace.icon(forFile: url.path)
         let title: String = {
-            if selectedIsApplication, let bundle = Bundle(url: url) {
+            if selectedKind == .application, let bundle = Bundle(url: url) {
                 return bundle.localizedDisplayName
                     ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String
                     ?? bundle.infoDictionary?["CFBundleName"] as? String
@@ -291,13 +301,15 @@ final class OpenTargetConfigPopover: NSObject {
         let content = FileSlotView.FilledContent(icon: icon, title: title, subtitle: path)
         fileSlot?.setState(.filled(content), animated: animated)
         doneButton?.isEnabled = true
-        setArgumentsVisible(true, animated: animated)
+        // .file 不支持参数 (NSWorkspace.open 不接受 argv), 隐藏 args 区域避免误导.
+        let supportsArgs = (selectedKind == .application || selectedKind == .script)
+        setArgumentsVisible(supportsArgs, animated: animated)
     }
 
     private func onFileSlotCleared() {
         selectedPath = nil
         selectedBundleID = nil
-        selectedIsApplication = false
+        selectedKind = .file
         staleBanner?.isHidden = true
         fileSlot?.setState(.empty, animated: true)
         doneButton?.isEnabled = false
@@ -330,7 +342,7 @@ final class OpenTargetConfigPopover: NSObject {
             path: path,
             bundleID: selectedBundleID,
             arguments: argsField.stringValue,
-            isApplication: selectedIsApplication
+            kind: selectedKind
         )
         onCommit?(payload)
         hide()
@@ -453,7 +465,7 @@ final class FileSlotView: NSView {
     private func refreshAppearance(animated: Bool) {
         if animated {
             CATransaction.begin()
-            CATransaction.setAnimationDuration(0.15)
+            CATransaction.setAnimationDuration(0.22)
             CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
         } else {
             CATransaction.begin()
@@ -516,7 +528,7 @@ final class FileSlotView: NSView {
             showView.alphaValue = 0
             showView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.98, y: 0.98))
             NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.25
+                ctx.duration = 0.4
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 ctx.allowsImplicitAnimation = true
                 showView.animator().alphaValue = 1
@@ -634,17 +646,23 @@ final class FileSlotView: NSView {
         let title = NSTextField(labelWithString: "")
         title.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         title.textColor = NSColor.labelColor
-        title.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(title)
         self.filledTitle = title
 
         let subtitle = NSTextField(labelWithString: "")
         subtitle.font = NSFont.systemFont(ofSize: 10.5)
         subtitle.textColor = NSColor.tertiaryLabelColor
         subtitle.lineBreakMode = .byTruncatingMiddle
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(subtitle)
         self.filledSubtitle = subtitle
+
+        // 用 NSStackView 包裹 title+subtitle, 整体 centerY 对齐到容器, 与左侧图标的
+        // centerY 同轴; 直接给 title 设 topAnchor=topConstant 会让文本组偏上, 视觉
+        // 与图标错位.
+        let textStack = NSStackView(views: [title, subtitle])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 2
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(textStack)
 
         let clearBtn = HoverableClearButton()
         clearBtn.tag = 99  // used in mouseDown hit test
@@ -667,13 +685,9 @@ final class FileSlotView: NSView {
             icon.widthAnchor.constraint(equalToConstant: 36),
             icon.heightAnchor.constraint(equalToConstant: 36),
 
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: clearBtn.leadingAnchor, constant: -8),
-            title.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2),
+            textStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: clearBtn.leadingAnchor, constant: -8),
+            textStack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
 
             clearBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             clearBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
@@ -752,7 +766,7 @@ final class FileSlotView: NSView {
         // 之后直接 CATransform3DMakeScale 就是中心枢轴的简单 scale.
         ensureCenterAnchor()
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
+            ctx.duration = 0.3
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
             layer.transform = abs(scale - 1.0) < 0.001
@@ -844,7 +858,7 @@ private final class HoverableClearButton: NSButton {
         guard #available(macOS 10.14, *) else { return }
         if animated {
             CATransaction.begin()
-            CATransaction.setAnimationDuration(0.15)
+            CATransaction.setAnimationDuration(0.22)
             CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
         } else {
             CATransaction.begin()
