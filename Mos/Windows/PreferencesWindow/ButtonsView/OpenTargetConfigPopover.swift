@@ -45,6 +45,13 @@ final class OpenTargetConfigPopover: NSObject {
         popover.contentViewController = makeViewController(initialArgs: existing?.arguments ?? "")
         popover.show(relativeTo: sourceView.bounds, of: sourceView, preferredEdge: .maxY)
         self.popover = popover
+
+        // Initial state
+        if existing != nil {
+            applyFilledStateForCurrentSelection(animated: false)
+        } else {
+            fileSlot?.setState(.empty, animated: false)
+        }
     }
 
     func hide() {
@@ -63,6 +70,7 @@ final class OpenTargetConfigPopover: NSObject {
         let slot = FileSlotView()
         slot.translatesAutoresizingMaskIntoConstraints = false
         slot.onClick = { [weak self] in self?.onFileSlotClicked() }
+        slot.onClear = { [weak self] in self?.onFileSlotCleared() }
         container.addSubview(slot)
         self.fileSlot = slot
 
@@ -146,6 +154,36 @@ final class OpenTargetConfigPopover: NSObject {
         NSLog("OpenTargetConfigPopover: file slot clicked (NSOpenPanel TODO)")
     }
 
+    private func applyFilledStateForCurrentSelection(animated: Bool) {
+        guard let path = selectedPath else {
+            fileSlot?.setState(.empty, animated: animated)
+            doneButton?.isEnabled = false
+            return
+        }
+        let url = URL(fileURLWithPath: path)
+        let workspace = NSWorkspace.shared
+        let icon = workspace.icon(forFile: url.path)
+        let title: String = {
+            if selectedIsApplication, let bundle = Bundle(url: url) {
+                return bundle.infoDictionary?["CFBundleDisplayName"] as? String
+                    ?? bundle.infoDictionary?["CFBundleName"] as? String
+                    ?? url.deletingPathExtension().lastPathComponent
+            }
+            return url.lastPathComponent
+        }()
+        let content = FileSlotView.FilledContent(icon: icon, title: title, subtitle: path)
+        fileSlot?.setState(.filled(content), animated: animated)
+        doneButton?.isEnabled = true
+    }
+
+    private func onFileSlotCleared() {
+        selectedPath = nil
+        selectedBundleID = nil
+        selectedIsApplication = false
+        fileSlot?.setState(.empty, animated: true)
+        doneButton?.isEnabled = false
+    }
+
     @objc private func onDoneButton() {
         guard let path = selectedPath, let argsField = argsField else { return }
         let payload = OpenTargetPayload(
@@ -164,14 +202,45 @@ final class OpenTargetConfigPopover: NSObject {
     }
 }
 
-// MARK: - File slot view (skeleton — empty state only for Task 9)
+// MARK: - File slot view (empty + filled states with crossfade)
 
 final class FileSlotView: NSView {
 
     var onClick: (() -> Void)?
+    var onClear: (() -> Void)?
 
-    private let primaryLabel = NSTextField(labelWithString: NSLocalizedString("open-target-empty-primary", comment: ""))
-    private let secondaryLabel = NSTextField(labelWithString: NSLocalizedString("open-target-empty-secondary", comment: ""))
+    private(set) var state: State = .empty
+
+    enum State: Equatable {
+        case empty
+        case filled(FilledContent)
+
+        static func == (lhs: State, rhs: State) -> Bool {
+            switch (lhs, rhs) {
+            case (.empty, .empty):
+                return true
+            case (.filled(let lhsContent), .filled(let rhsContent)):
+                return lhsContent == rhsContent
+            default:
+                return false
+            }
+        }
+    }
+
+    struct FilledContent: Equatable {
+        let icon: NSImage?
+        let title: String
+        let subtitle: String
+
+        static func == (lhs: FilledContent, rhs: FilledContent) -> Bool {
+            return lhs.icon === rhs.icon &&
+                   lhs.title == rhs.title &&
+                   lhs.subtitle == rhs.subtitle
+        }
+    }
+
+    private var emptyView: NSView!
+    private var filledView: NSView!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -186,33 +255,15 @@ final class FileSlotView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.secondaryLabelColor.withAlphaComponent(0.5).cgColor
-        // Dashed border via a CAShapeLayer overlay would be fancier; for skeleton, solid is acceptable.
-        // We'll upgrade to dashed in Task 10.
-        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.04).cgColor
 
-        toolTip = NSLocalizedString("open-target-empty-tooltip", comment: "")
+        emptyView = makeEmptyView()
+        filledView = makeFilledView()
+        emptyView.alphaValue = 1
+        filledView.alphaValue = 0
+        addSubview(emptyView)
+        addSubview(filledView)
 
-        let stack = NSStackView(views: [primaryLabel, secondaryLabel])
-        stack.orientation = .vertical
-        stack.spacing = 2
-        stack.alignment = .centerX
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        primaryLabel.font = NSFont.systemFont(ofSize: 13)
-        primaryLabel.textColor = NSColor.labelColor
-        secondaryLabel.font = NSFont.systemFont(ofSize: 11)
-        secondaryLabel.textColor = NSColor.tertiaryLabelColor
-
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-
-        // Hover cursor
-        addCursorRect(bounds, cursor: .pointingHand)
+        applyEmptyAppearance()
     }
 
     override func resetCursorRects() {
@@ -220,7 +271,187 @@ final class FileSlotView: NSView {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func layout() {
+        super.layout()
+        emptyView.frame = bounds
+        filledView.frame = bounds
+    }
+
     override func mouseDown(with event: NSEvent) {
+        // Don't propagate clicks on the clear button
+        let point = convert(event.locationInWindow, from: nil)
+        if let clearBtn = filledView.viewWithTag(99), clearBtn.frame.contains(point), case .filled = state {
+            return
+        }
         onClick?()
+    }
+
+    // MARK: State control
+
+    func setState(_ newState: State, animated: Bool = true) {
+        guard newState != state else { return }
+        state = newState
+
+        let (showView, hideView): (NSView, NSView) = {
+            switch newState {
+            case .empty: return (emptyView, filledView)
+            case .filled(let content):
+                applyFilledContent(content)
+                return (filledView, emptyView)
+            }
+        }()
+
+        switch newState {
+        case .empty: applyEmptyAppearance()
+        case .filled: applyFilledAppearance()
+        }
+
+        if animated {
+            showView.alphaValue = 0
+            showView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.98, y: 0.98))
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.25
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                showView.animator().alphaValue = 1
+                showView.animator().layer?.setAffineTransform(.identity)
+                hideView.animator().alphaValue = 0
+            })
+        } else {
+            showView.alphaValue = 1
+            showView.layer?.setAffineTransform(.identity)
+            hideView.alphaValue = 0
+        }
+    }
+
+    // MARK: Appearance
+
+    fileprivate func applyEmptyAppearance() {
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.secondaryLabelColor.withAlphaComponent(0.5).cgColor
+        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.04).cgColor
+        toolTip = NSLocalizedString("open-target-empty-tooltip", comment: "")
+    }
+
+    fileprivate func applyFilledAppearance() {
+        layer?.borderWidth = 1
+        if #available(macOS 10.14, *) {
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        } else {
+            layer?.borderColor = NSColor.gridColor.cgColor
+        }
+        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.03).cgColor
+        toolTip = NSLocalizedString("open-target-filled-tooltip", comment: "")
+    }
+
+    // MARK: Empty subview
+
+    private func makeEmptyView() -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+
+        let primary = NSTextField(labelWithString: NSLocalizedString("open-target-empty-primary", comment: ""))
+        primary.font = NSFont.systemFont(ofSize: 13)
+        primary.textColor = NSColor.labelColor
+
+        let secondary = NSTextField(labelWithString: NSLocalizedString("open-target-empty-secondary", comment: ""))
+        secondary.font = NSFont.systemFont(ofSize: 11)
+        secondary.textColor = NSColor.tertiaryLabelColor
+
+        let stack = NSStackView(views: [primary, secondary])
+        stack.orientation = .vertical
+        stack.spacing = 2
+        stack.alignment = .centerX
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+        return container
+    }
+
+    // MARK: Filled subview
+
+    private weak var filledIcon: NSImageView?
+    private weak var filledTitle: NSTextField?
+    private weak var filledSubtitle: NSTextField?
+
+    private func makeFilledView() -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+
+        let icon = NSImageView()
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(icon)
+        self.filledIcon = icon
+
+        let title = NSTextField(labelWithString: "")
+        title.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        title.textColor = NSColor.labelColor
+        title.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(title)
+        self.filledTitle = title
+
+        let subtitle = NSTextField(labelWithString: "")
+        subtitle.font = NSFont.systemFont(ofSize: 10.5)
+        subtitle.textColor = NSColor.tertiaryLabelColor
+        subtitle.lineBreakMode = .byTruncatingMiddle
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(subtitle)
+        self.filledSubtitle = subtitle
+
+        let clearBtn = NSButton()
+        clearBtn.tag = 99  // used in mouseDown hit test
+        clearBtn.bezelStyle = .inline
+        clearBtn.isBordered = false
+        if #available(macOS 11.0, *) {
+            clearBtn.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
+        } else {
+            clearBtn.title = "✕"
+        }
+        if #available(macOS 10.14, *) {
+            clearBtn.contentTintColor = NSColor.tertiaryLabelColor
+        }
+        clearBtn.toolTip = NSLocalizedString("open-target-clear-tooltip", comment: "")
+        clearBtn.target = self
+        clearBtn.action = #selector(onClearClicked)
+        clearBtn.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(clearBtn)
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            icon.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 36),
+            icon.heightAnchor.constraint(equalToConstant: 36),
+
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: clearBtn.leadingAnchor, constant: -8),
+            title.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
+
+            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            subtitle.trailingAnchor.constraint(equalTo: title.trailingAnchor),
+            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2),
+
+            clearBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            clearBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            clearBtn.widthAnchor.constraint(equalToConstant: 16),
+            clearBtn.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
+        return container
+    }
+
+    private func applyFilledContent(_ content: FilledContent) {
+        filledIcon?.image = content.icon
+        filledTitle?.stringValue = content.title
+        filledSubtitle?.stringValue = content.subtitle
+        toolTip = "\(content.subtitle)\n\(NSLocalizedString("open-target-filled-tooltip", comment: ""))"
+    }
+
+    @objc private func onClearClicked() {
+        onClear?()
     }
 }
