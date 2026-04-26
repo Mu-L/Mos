@@ -1987,8 +1987,10 @@ extension LogiDebugPanel: NSOutlineViewDelegate {
         )
     }
 
-    /// 副行: 传输方式 · 接口角色 · HID++ 协议标记.
-    /// 接收器名本身已含类型, 所以不重复 transport/role, 只显示协议标记.
+    /// 副行:
+    ///   - 直连设备: 传输方式 · 接口角色 (HID++ 标记冗余, FEATURES 面板已表达;
+    ///     侧栏宽度 ~148px, 多一项会截断 'BLE · Mouse · HID++').
+    ///   - 接收器:   HID++ 标记 (接收器名本身含类型, 不重复 transport/role).
     private func renderDeviceRowSecondary(node: DeviceNode) -> NSAttributedString {
         let session = node.session
         let meta     = NSFont.systemFont(ofSize: 10)
@@ -1998,8 +2000,7 @@ extension LogiDebugPanel: NSOutlineViewDelegate {
         if !node.isReceiver {
             segments.append(session.debugIsBLE ? "BLE" : "USB")
             segments.append(interfaceRole(for: session))
-        }
-        if session.isHIDPPCandidate {
+        } else if session.isHIDPPCandidate {
             segments.append("HID++")
         }
 
