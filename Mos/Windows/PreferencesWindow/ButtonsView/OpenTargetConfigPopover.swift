@@ -25,6 +25,7 @@ final class OpenTargetConfigPopover: NSObject {
     private weak var fileSlot: FileSlotView?
     private weak var argsField: NSTextField?
     private weak var doneButton: NSButton?
+    private weak var staleBanner: NSView?
 
     // Layout constants
     private static let contentWidth: CGFloat = 320
@@ -52,12 +53,29 @@ final class OpenTargetConfigPopover: NSObject {
         popover.show(relativeTo: sourceView.bounds, of: sourceView, preferredEdge: .maxY)
         self.popover = popover
 
-        // Initial state
-        if existing != nil {
+        // Initial state with stale detection
+        if existing != nil, isCurrentSelectionResolvable() {
             applyFilledStateForCurrentSelection(animated: false)
+        } else if existing != nil {
+            // Stale: show warning, fall back to empty state
+            staleBanner?.isHidden = false
+            selectedPath = nil
+            selectedBundleID = nil
+            selectedIsApplication = false
+            fileSlot?.setState(.empty, animated: false)
+            doneButton?.isEnabled = false
         } else {
             fileSlot?.setState(.empty, animated: false)
         }
+    }
+
+    private func isCurrentSelectionResolvable() -> Bool {
+        guard let path = selectedPath else { return false }
+        if selectedIsApplication, let bundleID = selectedBundleID,
+           NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil {
+            return true
+        }
+        return FileManager.default.fileExists(atPath: path)
     }
 
     func hide() {
@@ -71,6 +89,13 @@ final class OpenTargetConfigPopover: NSObject {
         let vc = NSViewController()
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
+
+        // Stale banner (initially hidden)
+        let banner = makeStaleBanner()
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        banner.isHidden = true
+        container.addSubview(banner)
+        self.staleBanner = banner
 
         // File slot (empty state for now; filled state in Task 10)
         let slot = FileSlotView()
@@ -132,7 +157,11 @@ final class OpenTargetConfigPopover: NSObject {
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: Self.contentWidth + Self.padding * 2),
 
-            slot.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.padding),
+            banner.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.padding),
+            banner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.padding),
+            banner.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
+
+            slot.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 8),
             slot.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.padding),
             slot.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
             slot.heightAnchor.constraint(equalToConstant: Self.slotHeight),
@@ -155,6 +184,26 @@ final class OpenTargetConfigPopover: NSObject {
 
         vc.view = container
         return vc
+    }
+
+    private func makeStaleBanner() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+
+        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil) {
+            let imageView = NSImageView(image: symbol)
+            imageView.contentTintColor = NSColor.systemOrange
+            stack.addArrangedSubview(imageView)
+        }
+
+        let label = NSTextField(labelWithString: NSLocalizedString("open-target-stale-warning", comment: ""))
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = NSColor.systemOrange
+        stack.addArrangedSubview(label)
+
+        return stack
     }
 
     // MARK: - Interactions (placeholders for Tasks 10-11)
@@ -197,6 +246,7 @@ final class OpenTargetConfigPopover: NSObject {
         selectedPath = picked.path
         selectedBundleID = picked.bundleID
         selectedIsApplication = picked.isApplication
+        staleBanner?.isHidden = true
         applyFilledStateForCurrentSelection(animated: true)
     }
 
@@ -226,6 +276,7 @@ final class OpenTargetConfigPopover: NSObject {
         selectedPath = nil
         selectedBundleID = nil
         selectedIsApplication = false
+        staleBanner?.isHidden = true
         fileSlot?.setState(.empty, animated: true)
         doneButton?.isEnabled = false
     }

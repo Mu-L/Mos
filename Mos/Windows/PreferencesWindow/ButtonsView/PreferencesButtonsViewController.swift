@@ -224,6 +224,40 @@ extension PreferencesButtonsViewController {
         )
         syncViewWithOptions()
     }
+
+    /// 更新按钮绑定 ("打开应用" 动作)
+    func updateButtonBinding(id: UUID, withOpenTarget payload: OpenTargetPayload) {
+        guard let index = buttonBindings.firstIndex(where: { $0.id == id }) else { return }
+        let old = buttonBindings[index]
+        buttonBindings[index] = ButtonBinding(
+            id: old.id,
+            triggerEvent: old.triggerEvent,
+            openTarget: payload,
+            isEnabled: true,
+            createdAt: old.createdAt
+        )
+        syncViewWithOptions()
+        tableView.reloadData()
+    }
+
+    private func presentOpenTargetPopover(forBindingID id: UUID) {
+        guard let index = buttonBindings.firstIndex(where: { $0.id == id }) else { return }
+        guard let row = tableView.row(forBinding: id, in: buttonBindings) else { return }
+        guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? ButtonTableCellView else { return }
+
+        let existing = buttonBindings[index].openTarget
+
+        let popover = OpenTargetConfigPopover()
+        currentOpenTargetPopover = popover
+        popover.onCommit = { [weak self] payload in
+            self?.updateButtonBinding(id: id, withOpenTarget: payload)
+            self?.currentOpenTargetPopover = nil
+        }
+        popover.onCancel = { [weak self] in
+            self?.currentOpenTargetPopover = nil
+        }
+        popover.show(at: cell.actionPopUpButton, existing: existing)
+    }
 }
 
 /**
@@ -259,19 +293,8 @@ extension PreferencesButtonsViewController: NSTableViewDelegate, NSTableViewData
                 onCustomShortcutRecorded: { [weak self] customName in
                     self?.updateButtonBinding(id: binding.id, withCustomName: customName)
                 },
-                onOpenTargetSelectionRequested: { [weak self, weak cell] in
-                    // Temporary skeleton wiring — final persistence lands in Task 12
-                    guard let self = self, let sourceView = cell?.actionPopUpButton else { return }
-                    let popover = OpenTargetConfigPopover()
-                    self.currentOpenTargetPopover = popover
-                    popover.onCommit = { [weak self] payload in
-                        NSLog("OpenTargetConfigPopover: commit (skeleton) — \(payload)")
-                        self?.currentOpenTargetPopover = nil
-                    }
-                    popover.onCancel = { [weak self] in
-                        self?.currentOpenTargetPopover = nil
-                    }
-                    popover.show(at: sourceView, existing: nil)
+                onOpenTargetSelectionRequested: { [weak self] in
+                    self?.presentOpenTargetPopover(forBindingID: binding.id)
                 },
                 onDeleteRequested: { [weak self] in
                     self?.removeButtonBinding(id: binding.id)
@@ -492,6 +515,12 @@ extension PreferencesButtonsViewController {
         popover.contentViewController = content
         activityPopoverContent = content
         return popover
+    }
+}
+
+private extension NSTableView {
+    func row(forBinding id: UUID, in bindings: [ButtonBinding]) -> Int? {
+        return bindings.firstIndex(where: { $0.id == id })
     }
 }
 
