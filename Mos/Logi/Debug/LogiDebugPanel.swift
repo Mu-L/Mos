@@ -874,14 +874,28 @@ class LogiDebugPanel: NSObject {
         exportBtn.autoresizingMask = [.minXMargin]
         toolbar.addSubview(exportBtn)
 
-        // Position clear/export from right using frame + autoresizingMask
+        let selfTestBtn = makeActionBtn(title: "Self-Test\u{2026}", action: #selector(selfTestClicked))
+        selfTestBtn.frame = NSRect(x: 0, y: 4, width: 70, height: 20)
+        selfTestBtn.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+        selfTestBtn.autoresizingMask = [.minXMargin]
+        toolbar.addSubview(selfTestBtn)
+
+        // Position clear/export/self-test from right using frame + autoresizingMask
         // Will be repositioned after layout
         toolbar.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: toolbar, queue: .main) { _ in
             let w = toolbar.bounds.width
             clearBtn.frame.origin.x = w - 50
             exportBtn.frame.origin.x = w - 100
+            // exportBtn.x (w-100) - selfTest width (70) - gap (4) = w - 174
+            selfTestBtn.frame.origin.x = w - 174
         }
+    }
+
+    @objc private func selfTestClicked() {
+        #if DEBUG
+        LogiSelfTestWizard.shared.show()
+        #endif
     }
 
     private func buildRawInputBar(in container: NSView) {
@@ -2127,6 +2141,9 @@ extension LogiDebugPanel: NSTableViewDelegate {
             case .mosOwned:
                 label.stringValue = "DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
+            case .coDivert:
+                label.stringValue = "DVRT\u{26A0}"
+                label.textColor = NSColor(calibratedRed: 1.0, green: 0.5, blue: 0.3, alpha: 0.95)
             case .clear:
                 label.stringValue = "\u{25CF}"
                 label.textColor = NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0)

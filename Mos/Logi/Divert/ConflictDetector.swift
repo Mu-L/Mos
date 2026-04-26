@@ -5,20 +5,25 @@
 
 import Foundation
 
-/// 5-state Logi CID conflict status (Round 4 H2: precedence foreign > remap > mos > clear).
+/// 6-state Logi CID conflict status. Precedence:
+///   coDivert > foreignDivert > remap > mosOwned > clear
 /// Backed by device-truth (reportingFlags + targetCID) plus Mos's own divertedCIDs set.
 public enum ConflictStatus: Equatable {
     case clear
     case foreignDivert
     case remapped
     case mosOwned
+    case coDivert    // Mos AND a third party are both diverting this CID.
+                     // Device fires the divertedButtonsEvent to BOTH HID++ sessions
+                     // (IOKit broadcast) → both Mos and the third party act on the
+                     // same press, causing visible double-trigger.
     case unknown
 
     /// Legacy adapter for callers that previously checked `== .conflict`.
-    /// Conflict = a status the user should be alerted to (foreign divert + foreign remap).
+    /// Conflict = a status the user should be alerted to (foreign divert + foreign remap + co-divert).
     public var isConflict: Bool {
         switch self {
-        case .foreignDivert, .remapped: return true
+        case .foreignDivert, .remapped, .coDivert: return true
         case .clear, .mosOwned, .unknown: return false
         }
     }
@@ -26,7 +31,7 @@ public enum ConflictStatus: Equatable {
 
 /// Status detector for one Logi CID.
 /// Precedence (matches LogiDebugPanel cStatus column visual order):
-///   foreign-divert > remap > mos-owned > clear
+///   co-divert > foreign-divert > remap > mos-owned > clear
 struct LogiConflictDetector {
     static func status(reportingFlags: UInt8,
                        targetCID: UInt16,
@@ -34,13 +39,14 @@ struct LogiConflictDetector {
                        reportingQueried: Bool,
                        mosOwnsDivert: Bool) -> ConflictStatus {
         guard reportingQueried else { return .unknown }
-        // Foreign divert: device-side reporting bit set AND not by Mos.
-        let isForeignDivert = reportingFlags != 0 && !mosOwnsDivert
-        if isForeignDivert { return .foreignDivert }
-        // Remap: targetCID set to a different CID (self-remap is identity, not a remap).
-        let isRemapped = targetCID != 0 && targetCID != cid
-        if isRemapped { return .remapped }
-        // Mos owns the divert: bit set by Mos's own setControlReporting.
+        let foreign = reportingFlags != 0
+        let remapped = targetCID != 0 && targetCID != cid
+        // Both Mos and a third party have set divert on this CID → double-fire
+        // is observable. mosOwned alone (no foreign) means we're the sole
+        // owner — nothing to flag.
+        if foreign && mosOwnsDivert { return .coDivert }
+        if foreign { return .foreignDivert }
+        if remapped { return .remapped }
         if mosOwnsDivert { return .mosOwned }
         return .clear
     }
