@@ -138,7 +138,7 @@ class ShortcutExecutor {
             return .none
         case .openTarget(let payload):
             guard phase == .down else { return .none }
-            NSLog("OpenTarget: stub — would execute path=\(payload.path)")
+            executeOpenTarget(payload)
             return .none
         case .systemShortcut(let identifier):
             guard phase == .down else { return .none }
@@ -314,6 +314,109 @@ class ShortcutExecutor {
             LogiCenter.shared.executeDPICycle(direction: .down)
         default:
             break
+        }
+    }
+
+    // MARK: - Open Target Actions
+
+    private func executeOpenTarget(_ payload: OpenTargetPayload) {
+        if payload.isApplication {
+            launchApplication(payload)
+        } else {
+            runScript(payload)
+        }
+    }
+
+    private func launchApplication(_ payload: OpenTargetPayload) {
+        let workspace = NSWorkspace.shared
+        let resolvedURL: URL? = {
+            if let bundleID = payload.bundleID,
+               let url = workspace.urlForApplication(withBundleIdentifier: bundleID) {
+                return url
+            }
+            let url = URL(fileURLWithPath: payload.path)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }()
+
+        guard let url = resolvedURL else {
+            let appName = (payload.path as NSString).lastPathComponent
+            Toast.show(
+                String(format: NSLocalizedString("openTargetAppNotFound", comment: ""), appName),
+                style: .error
+            )
+            NSLog("OpenTarget: cannot resolve application path=\(payload.path) bundleID=\(payload.bundleID ?? "-")")
+            return
+        }
+
+        let arguments = ArgumentSplitter.split(payload.arguments)
+        if #available(macOS 10.15, *) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.arguments = arguments
+            configuration.activates = true
+            workspace.openApplication(at: url, configuration: configuration) { _, error in
+                if let error = error {
+                    let appName = url.deletingPathExtension().lastPathComponent
+                    Toast.show(
+                        String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
+                        style: .error
+                    )
+                    NSLog("OpenTarget: launch failed: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            let configuration: [NSWorkspace.LaunchConfigurationKey: Any] = [
+                .arguments: arguments
+            ]
+            guard let launched = try? workspace.launchApplication(
+                at: url,
+                options: [.default, .async],
+                configuration: configuration
+            ) else {
+                let appName = url.deletingPathExtension().lastPathComponent
+                Toast.show(
+                    String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
+                    style: .error
+                )
+                NSLog("OpenTarget: legacy launch failed for path=\(url.path)")
+                return
+            }
+            launched.activate(options: [.activateIgnoringOtherApps])
+        }
+    }
+
+    private func runScript(_ payload: OpenTargetPayload) {
+        let url = URL(fileURLWithPath: payload.path)
+        let scriptName = url.lastPathComponent
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            Toast.show(
+                String(format: NSLocalizedString("openTargetScriptNotFound", comment: ""), scriptName),
+                style: .error
+            )
+            NSLog("OpenTarget: script not found: \(payload.path)")
+            return
+        }
+
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            Toast.show(
+                String(format: NSLocalizedString("openTargetScriptNotExecutable", comment: ""), scriptName),
+                style: .warning
+            )
+            NSLog("OpenTarget: script not executable: \(payload.path)")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = url
+        process.arguments = ArgumentSplitter.split(payload.arguments)
+        do {
+            try process.run()
+        } catch {
+            Toast.show(
+                String(format: NSLocalizedString("openTargetScriptFailed", comment: ""), scriptName),
+                style: .error
+            )
+            NSLog("OpenTarget: script execution failed: \(error.localizedDescription)")
         }
     }
 

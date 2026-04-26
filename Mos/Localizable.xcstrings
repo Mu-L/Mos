@@ -6988,6 +6988,91 @@
         }
       }
     },
+    "openTargetAppLaunchFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to launch \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动 \"%@\" 失败"
+          }
+        }
+      }
+    },
+    "openTargetAppNotFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Application \"%@\" not found — it may have been moved or deleted"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到应用 \"%@\", 可能已被移动或删除"
+          }
+        }
+      }
+    },
+    "openTargetScriptFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script \"%@\" failed to start"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脚本 \"%@\" 执行失败"
+          }
+        }
+      }
+    },
+    "openTargetScriptNotExecutable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script \"%@\" is not executable — run chmod +x"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脚本 \"%@\" 没有执行权限, 请运行 chmod +x"
+          }
+        }
+      }
+    },
+    "openTargetScriptNotFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script \"%@\" not found"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到脚本 \"%@\""
+          }
+        }
+      }
+    },
     "paste" : {
       "extractionState" : "manual",
       "localizations" : {
