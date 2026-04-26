@@ -38,43 +38,96 @@ struct ActionPresentation {
     }
 }
 
+/// Cell 当前展示的动作态 (互斥).
+///
+/// 加新动作类型 = 加一个 case, switch 站点会在编译期被强制覆盖, 不再依赖人工同步分散的字段.
+/// `.recordingPrompt` 是 UI 临时态 (录制进行中), 其它都对应一种持久化绑定形式.
+enum CellActionState: Equatable {
+    case unbound
+    case recordingPrompt
+    case namedShortcut(SystemShortcut.Shortcut)
+    case customBinding(name: String)
+    case openTarget(OpenTargetPayload)
+
+    /// 是否处于"已绑定"状态 (用于菜单 placeholder 显隐判定).
+    var hasBoundAction: Bool {
+        switch self {
+        case .unbound, .recordingPrompt:
+            return false
+        case .namedShortcut, .customBinding, .openTarget:
+            return true
+        }
+    }
+
+    /// 从 ButtonBinding 推断对应的展示态 (不含临时态 .recordingPrompt).
+    /// 优先级: openTarget > 预定义 systemShortcut > customBinding > unbound.
+    init(binding: ButtonBinding) {
+        if let openTarget = binding.openTarget {
+            self = .openTarget(openTarget)
+            return
+        }
+        if let shortcut = binding.systemShortcut {
+            self = .namedShortcut(shortcut)
+            return
+        }
+        if binding.isCustomBinding {
+            self = .customBinding(name: binding.systemShortcutName)
+            return
+        }
+        self = .unbound
+    }
+}
+
 struct ActionDisplayResolver {
 
+    /// 主入口: 接收单一态枚举, 内部 switch 全 case 强制覆盖.
+    func resolve(state: CellActionState) -> ActionPresentation {
+        switch state {
+        case .unbound:
+            return ActionPresentation(
+                kind: .unbound,
+                title: NSLocalizedString("unbound", comment: "")
+            )
+        case .recordingPrompt:
+            return ActionPresentation(
+                kind: .recordingPrompt,
+                title: NSLocalizedString("custom-recording-prompt", comment: "")
+            )
+        case .namedShortcut(let shortcut):
+            return namedActionPresentation(for: shortcut)
+        case .openTarget(let payload):
+            return openTargetPresentation(for: payload)
+        case .customBinding(let name):
+            // 自定义绑定有可能"升级"成已知 named action (键码与 mouseLeftClick 等系统快捷键
+            // 等价时), 否则按 keyCombo 渲染.
+            if let shortcut = SystemShortcut.displayShortcut(matchingBindingName: name) {
+                return namedActionPresentation(for: shortcut)
+            }
+            if let custom = customBindingPresentation(for: name) {
+                return custom
+            }
+            return ActionPresentation(
+                kind: .unbound,
+                title: NSLocalizedString("unbound", comment: "")
+            )
+        }
+    }
+
+    /// 旧入口: 把分散参数转 enum 后转发. 保留为兼容已有测试; 新代码请用 resolve(state:).
     func resolve(
         shortcut: SystemShortcut.Shortcut?,
         customBindingName: String?,
         isRecording: Bool,
         openTarget: OpenTargetPayload? = nil
     ) -> ActionPresentation {
-        if isRecording {
-            return ActionPresentation(
-                kind: .recordingPrompt,
-                title: NSLocalizedString("custom-recording-prompt", comment: "")
-            )
-        }
-
-        if let openTarget {
-            return openTargetPresentation(for: openTarget)
-        }
-
-        if let shortcut {
-            return namedActionPresentation(for: shortcut)
-        }
-
-        if let customBindingName {
-            if let shortcut = SystemShortcut.displayShortcut(matchingBindingName: customBindingName) {
-                return namedActionPresentation(for: shortcut)
-            }
-
-            if let customPresentation = customBindingPresentation(for: customBindingName) {
-                return customPresentation
-            }
-        }
-
-        return ActionPresentation(
-            kind: .unbound,
-            title: NSLocalizedString("unbound", comment: "")
-        )
+        let state: CellActionState = {
+            if isRecording { return .recordingPrompt }
+            if let openTarget { return .openTarget(openTarget) }
+            if let shortcut { return .namedShortcut(shortcut) }
+            if let customBindingName { return .customBinding(name: customBindingName) }
+            return .unbound
+        }()
+        return resolve(state: state)
     }
 
     private func namedActionPresentation(for shortcut: SystemShortcut.Shortcut) -> ActionPresentation {
