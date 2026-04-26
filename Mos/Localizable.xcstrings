@@ -7073,6 +7073,23 @@
         }
       }
     },
+    "open-target-action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Application…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开应用…"
+          }
+        }
+      }
+    },
     "paste" : {
       "extractionState" : "manual",
       "localizations" : {

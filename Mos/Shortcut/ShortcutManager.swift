@@ -148,6 +148,21 @@ class ShortcutManager {
         // 自定义绑定分隔线
         menu.addItem(NSMenuItem.separator())
 
+        // "打开应用…" 菜单项 (representedObject 为字符串标记 __open__)
+        let openItem = NSMenuItem(
+            title: NSLocalizedString("open-target-action", comment: ""),
+            action: action,
+            keyEquivalent: ""
+        )
+        openItem.target = target
+        openItem.representedObject = "__open__" as NSString
+        if supportsSFSymbols {
+            if #available(macOS 11.0, *) {
+                openItem.image = createSymbolImage("arrow.up.forward.app")
+            }
+        }
+        menu.addItem(openItem)
+
         // "自定义…" 菜单项 (representedObject 为字符串标记)
         let customItem = NSMenuItem(
             title: NSLocalizedString("custom-shortcut", comment: ""),

@@ -332,6 +332,32 @@ final class ButtonBindingTests: XCTestCase {
         )
     }
 
+    func testBuildShortcutMenu_includesOpenTargetEntryAboveCustom() {
+        let menu = NSMenu()
+        let target = ShortcutMenuTestTarget()
+
+        ShortcutManager.buildShortcutMenu(
+            into: menu,
+            target: target,
+            action: #selector(ShortcutMenuTestTarget.noop(_:))
+        )
+
+        guard let openIndex = menu.items.firstIndex(where: {
+            ($0.representedObject as? String) == "__open__"
+        }) else {
+            return XCTFail("Expected '__open__' menu entry to exist")
+        }
+        guard let customIndex = menu.items.firstIndex(where: {
+            ($0.representedObject as? String) == "__custom__"
+        }) else {
+            return XCTFail("Expected '__custom__' menu entry to exist")
+        }
+        XCTAssertLessThan(openIndex, customIndex, "Open Application should appear above Custom Shortcut")
+
+        let openItem = menu.items[openIndex]
+        XCTAssertEqual(openItem.title, NSLocalizedString("open-target-action", comment: ""))
+    }
+
     func testBuildShortcutMenu_includesEscapeInFunctionKeysCategory() {
         let menu = NSMenu()
         let target = ShortcutMenuTestTarget()
