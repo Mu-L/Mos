@@ -258,6 +258,11 @@ extension PreferencesButtonsViewController: NSTableViewDelegate, NSTableViewData
                 onCustomShortcutRecorded: { [weak self] customName in
                     self?.updateButtonBinding(id: binding.id, withCustomName: customName)
                 },
+                onOpenTargetSelectionRequested: { [weak self] in
+                    // Stub — real popover lands in Task 12
+                    NSLog("OpenTargetConfigPopover: stub — would show popover for binding id=\(binding.id)")
+                    _ = self  // silence unused warning
+                },
                 onDeleteRequested: { [weak self] in
                     self?.removeButtonBinding(id: binding.id)
                 }

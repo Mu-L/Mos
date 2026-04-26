@@ -19,7 +19,10 @@ final class ButtonBindingTests: XCTestCase {
         )
     }
 
-    private func makeButtonCell(binding: ButtonBinding) -> ButtonTableCellView {
+    private func makeButtonCell(
+        binding: ButtonBinding,
+        onOpenTargetSelectionRequested: @escaping () -> Void = {}
+    ) -> ButtonTableCellView {
         let cell = ButtonTableCellView(frame: NSRect(x: 0, y: 0, width: 420, height: 44))
         let keyContainer = NSView(frame: NSRect(x: 0, y: 0, width: 140, height: 44))
         let actionButton = NSPopUpButton(frame: NSRect(x: 180, y: 8, width: 180, height: 28), pullsDown: false)
@@ -33,6 +36,7 @@ final class ButtonBindingTests: XCTestCase {
             with: binding,
             onShortcutSelected: { _ in },
             onCustomShortcutRecorded: { _ in },
+            onOpenTargetSelectionRequested: onOpenTargetSelectionRequested,
             onDeleteRequested: {}
         )
 
@@ -415,6 +419,22 @@ final class ButtonBindingTests: XCTestCase {
 
         let openItem = menu.items[openIndex]
         XCTAssertEqual(openItem.title, NSLocalizedString("open-target-action", comment: ""))
+    }
+
+    func testShortcutSelected_openSentinel_invokesOpenSelectionCallback() {
+        let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
+        let binding = ButtonBinding(triggerEvent: trigger, systemShortcutName: "")
+
+        var openSelectionInvoked = false
+        let cell = makeButtonCell(binding: binding, onOpenTargetSelectionRequested: {
+            openSelectionInvoked = true
+        })
+
+        let openItem = NSMenuItem(title: "Open Application…", action: nil, keyEquivalent: "")
+        openItem.representedObject = "__open__" as NSString
+        cell.shortcutSelected(openItem)
+
+        XCTAssertTrue(openSelectionInvoked, "Selecting the __open__ menu item should trigger onOpenTargetSelectionRequested")
     }
 
     func testBuildShortcutMenu_includesEscapeInFunctionKeysCategory() {

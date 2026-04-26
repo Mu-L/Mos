@@ -35,6 +35,9 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private var onShortcutSelected: ((SystemShortcut.Shortcut?) -> Void)?
     private var onDeleteRequested: (() -> Void)?
     private var onCustomShortcutRecorded: ((String) -> Void)?
+    /// 当用户从 PopUpButton 菜单选择 "打开应用…" 时触发,
+    /// 由 PreferencesButtonsViewController 弹出 OpenTargetConfigPopover.
+    private var onOpenTargetSelectionRequested: (() -> Void)?
     private var currentCustomName: String?
     private var currentOpenTarget: OpenTargetPayload?
     private var isCustomRecordingActive = false
@@ -55,12 +58,14 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         with binding: ButtonBinding,
         onShortcutSelected: @escaping (SystemShortcut.Shortcut?) -> Void,
         onCustomShortcutRecorded: @escaping (String) -> Void,
+        onOpenTargetSelectionRequested: @escaping () -> Void,
         onDeleteRequested: @escaping () -> Void
     ) {
         // 保存回调
         self.onShortcutSelected = onShortcutSelected
         self.onDeleteRequested = onDeleteRequested
         self.onCustomShortcutRecorded = onCustomShortcutRecorded
+        self.onOpenTargetSelectionRequested = onOpenTargetSelectionRequested
         // 清理可能残留的录制状态 (cell 复用时)
         customRecorder.stopRecording()
         isCustomRecordingActive = false
@@ -451,7 +456,13 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     // MARK: - Actions
 
     /// 快捷键选择回调
-    @objc private func shortcutSelected(_ sender: NSMenuItem) {
+    @objc internal func shortcutSelected(_ sender: NSMenuItem) {
+        // "打开应用…" sentinel: 把后续配置流程交给外部
+        if sender.representedObject as? String == "__open__" {
+            onOpenTargetSelectionRequested?()
+            return
+        }
+
         // 自定义录制: action 在 menuDidClose 之后触发,
         // 直接 asyncAfter 等待菜单动画和焦点恢复后弹出录制弹窗
         if sender.representedObject as? String == "__custom__" {
