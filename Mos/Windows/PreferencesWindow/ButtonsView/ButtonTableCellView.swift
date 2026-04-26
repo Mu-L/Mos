@@ -543,7 +543,10 @@ extension ButtonTableCellView {
         let firstSeparator = menu.items[1]   // 第一条分割线
         let unboundItem = menu.items[2]      // "未绑定"/"取消绑定"菜单项
 
-        let hasBoundAction = currentShortcut != nil || currentCustomName != nil || isCustomRecordingActive
+        let hasBoundAction = currentShortcut != nil
+            || currentCustomName != nil
+            || currentOpenTarget != nil
+            || isCustomRecordingActive
 
         if !hasBoundAction {
             // 当前是未绑定状态:隐藏占位符和第一条分割线,显示"未绑定"
