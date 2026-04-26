@@ -498,4 +498,81 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, SystemShortcut.screenshotSelection.localizedName)
         XCTAssertEqual(cell.actionPopUpButton.titleOfSelectedItem, SystemShortcut.screenshotSelection.localizedName)
     }
+
+    // MARK: - OpenTarget extension
+
+    func testOpenTargetSentinel_isStableConstant() {
+        XCTAssertEqual(ButtonBinding.openTargetSentinel, "openTarget")
+    }
+
+    func testInit_withOpenTargetPayload_setsSentinelName() {
+        let payload = OpenTargetPayload(
+            path: "/Applications/Safari.app",
+            bundleID: "com.apple.Safari",
+            arguments: "",
+            isApplication: true
+        )
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
+            openTarget: payload
+        )
+        XCTAssertEqual(binding.systemShortcutName, "openTarget")
+        XCTAssertEqual(binding.openTarget, payload)
+    }
+
+    func testCodableRoundtrip_preservesOpenTarget() {
+        let payload = OpenTargetPayload(
+            path: "/Applications/Safari.app",
+            bundleID: "com.apple.Safari",
+            arguments: "https://example.com",
+            isApplication: true
+        )
+        let original = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
+            openTarget: payload
+        )
+        let data = try! JSONEncoder().encode(original)
+        let decoded = try! JSONDecoder().decode(ButtonBinding.self, from: data)
+        XCTAssertEqual(decoded.systemShortcutName, "openTarget")
+        XCTAssertEqual(decoded.openTarget, payload)
+    }
+
+    func testCodableRoundtrip_legacyBindingHasNilOpenTarget() {
+        // Old JSON format: no openTarget field
+        let legacyJSON = """
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "triggerEvent": {
+                "type": "mouse",
+                "code": 3,
+                "modifiers": 0,
+                "displayComponents": ["🖱4"],
+                "deviceFilter": null
+            },
+            "systemShortcutName": "copy",
+            "isEnabled": true,
+            "createdAt": "2025-01-01T00:00:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = legacyJSON.data(using: .utf8)!
+        let decoded = try! decoder.decode(ButtonBinding.self, from: data)
+        XCTAssertEqual(decoded.systemShortcutName, "copy")
+        XCTAssertNil(decoded.openTarget)
+    }
+
+    func testEquatable_distinguishesByOpenTarget() {
+        let payloadA = OpenTargetPayload(path: "/a.app", bundleID: nil, arguments: "", isApplication: true)
+        let payloadB = OpenTargetPayload(path: "/b.app", bundleID: nil, arguments: "", isApplication: true)
+        let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
+        let id = UUID()
+        let createdAt = Date(timeIntervalSince1970: 0)
+
+        let a = ButtonBinding(id: id, triggerEvent: trigger, openTarget: payloadA, isEnabled: true, createdAt: createdAt)
+        let b = ButtonBinding(id: id, triggerEvent: trigger, openTarget: payloadA, isEnabled: true, createdAt: createdAt)
+        let c = ButtonBinding(id: id, triggerEvent: trigger, openTarget: payloadB, isEnabled: true, createdAt: createdAt)
+        XCTAssertEqual(a, b)
+        XCTAssertNotEqual(a, c)
+    }
 }

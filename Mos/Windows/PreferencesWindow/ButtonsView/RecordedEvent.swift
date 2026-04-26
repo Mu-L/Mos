@@ -222,6 +222,9 @@ struct ButtonBinding: Codable, Equatable {
     static let customBindingRelevantModifierMask: UInt64 =
         KeyCode.modifiersMask | CGEventFlags.maskSecondaryFn.rawValue
 
+    /// "打开应用" 动作 sentinel; systemShortcutName 取此值时, openTarget 字段为权威载荷.
+    static let openTargetSentinel = "openTarget"
+
     // MARK: - 持久化字段
 
     /// 唯一标识符
@@ -232,6 +235,7 @@ struct ButtonBinding: Codable, Equatable {
 
     /// 绑定的系统快捷键名称
     /// 自定义快捷键格式: "custom::<keyCode>:<modifierFlags>"
+    /// "打开应用" 动作: "openTarget" (此时 openTarget 字段非 nil)
     let systemShortcutName: String
 
     /// 是否启用
@@ -239,6 +243,9 @@ struct ButtonBinding: Codable, Equatable {
 
     /// 创建时间
     let createdAt: Date
+
+    /// "打开应用" 动作的结构化载荷; 仅当 systemShortcutName == openTargetSentinel 时非 nil.
+    let openTarget: OpenTargetPayload?
 
     // MARK: - 瞬态缓存字段 (不参与编解码)
 
@@ -251,7 +258,7 @@ struct ButtonBinding: Codable, Equatable {
     // MARK: - CodingKeys (仅编码持久化字段)
 
     enum CodingKeys: String, CodingKey {
-        case id, triggerEvent, systemShortcutName, isEnabled, createdAt
+        case id, triggerEvent, systemShortcutName, isEnabled, createdAt, openTarget
     }
 
     // MARK: - 计算属性
@@ -268,10 +275,29 @@ struct ButtonBinding: Codable, Equatable {
 
     // MARK: - 初始化
 
-    init(id: UUID = UUID(), triggerEvent: RecordedEvent, systemShortcutName: String, isEnabled: Bool = true, createdAt: Date = Date()) {
+    init(id: UUID = UUID(),
+         triggerEvent: RecordedEvent,
+         systemShortcutName: String,
+         isEnabled: Bool = true,
+         createdAt: Date = Date()) {
         self.id = id
         self.triggerEvent = triggerEvent
         self.systemShortcutName = systemShortcutName
+        self.isEnabled = isEnabled
+        self.createdAt = createdAt
+        self.openTarget = nil
+    }
+
+    /// "打开应用" 动作专用初始化器, 强制保证 sentinel 与 payload 一致.
+    init(id: UUID = UUID(),
+         triggerEvent: RecordedEvent,
+         openTarget: OpenTargetPayload,
+         isEnabled: Bool = true,
+         createdAt: Date = Date()) {
+        self.id = id
+        self.triggerEvent = triggerEvent
+        self.systemShortcutName = Self.openTargetSentinel
+        self.openTarget = openTarget
         self.isEnabled = isEnabled
         self.createdAt = createdAt
     }
@@ -321,7 +347,8 @@ struct ButtonBinding: Codable, Equatable {
                lhs.triggerEvent == rhs.triggerEvent &&
                lhs.systemShortcutName == rhs.systemShortcutName &&
                lhs.isEnabled == rhs.isEnabled &&
-               lhs.createdAt == rhs.createdAt
+               lhs.createdAt == rhs.createdAt &&
+               lhs.openTarget == rhs.openTarget
     }
 }
 
