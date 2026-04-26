@@ -38,12 +38,13 @@ enum ResolvedAction {
     case mouseButton(kind: MouseButtonActionKind)
     case systemShortcut(identifier: String)
     case logiAction(identifier: String)
+    case openTarget(payload: OpenTargetPayload)
 
     var executionMode: ActionExecutionMode {
         switch self {
         case .customKey, .mouseButton:
             return .stateful
-        case .logiAction:
+        case .logiAction, .openTarget:
             return .trigger
         case .systemShortcut(let identifier):
             return SystemShortcut.getShortcut(named: identifier)?.executionMode ?? .trigger
@@ -135,6 +136,10 @@ class ShortcutExecutor {
             guard phase == .down else { return .none }
             executeLogiAction(identifier)
             return .none
+        case .openTarget(let payload):
+            guard phase == .down else { return .none }
+            NSLog("OpenTarget: stub — would execute path=\(payload.path)")
+            return .none
         case .systemShortcut(let identifier):
             guard phase == .down else { return .none }
             executeResolvedSystemShortcut(named: identifier)
@@ -143,6 +148,11 @@ class ShortcutExecutor {
     }
 
     func resolveAction(named shortcutName: String, binding: ButtonBinding? = nil) -> ResolvedAction? {
+        // 优先: 结构化 payload (在 cachedCustomCode 之前判定, 避免命名冲突)
+        if let payload = binding?.openTarget,
+           shortcutName == ButtonBinding.openTargetSentinel {
+            return .openTarget(payload: payload)
+        }
         if let code = binding?.cachedCustomCode {
             let modifiers = binding?.cachedCustomModifiers ?? 0
             return .customKey(code: code, modifiers: modifiers)
