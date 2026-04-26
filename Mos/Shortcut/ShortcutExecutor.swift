@@ -387,6 +387,7 @@ class ShortcutExecutor {
         let process = Process()
         process.executableURL = command.executableURL
         process.arguments = command.arguments
+        process.environment = Self.sanitizedSubprocessEnvironment()
         do {
             try process.run()
         } catch {
@@ -397,6 +398,40 @@ class ShortcutExecutor {
             )
             NSLog("OpenTarget: launch failed via /usr/bin/open: \(error.localizedDescription)")
         }
+    }
+
+    /// 剥掉会污染目标进程的 env vars (调试器注入 / 内存分析器 / sanitizer 等).
+    ///
+    /// 关键背景: Process() 默认继承父进程完整环境. 当 Mos Debug 由 Xcode 启动时,
+    /// Xcode 注入 DYLD_INSERT_LIBRARIES=.../libViewDebuggerSupport.dylib 等 vars,
+    /// 这些一路传到 /usr/bin/open 再到 LaunchServices 启动的目标 App; 依赖 AVKit 的
+    /// sealed system app (FindMy/Maps/Podcasts) 加载 libViewDebuggerSupport 时找不到
+    /// _OBJC_CLASS_$_AVPlayerView, dyld halt → SIGABRT.
+    ///
+    /// 这是子进程 env 污染问题, 不是 Mos 本体的 bug; Release 版本 Mos 不会注入这些 vars,
+    /// 但开发时 Xcode 调试 + 也要用 OpenTarget 的话, 必须主动剥离.
+    static func sanitizedSubprocessEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        for key in env.keys where shouldStripEnvKey(key) {
+            env.removeValue(forKey: key)
+        }
+        return env
+    }
+
+    private static func shouldStripEnvKey(_ key: String) -> Bool {
+        // dyld 注入路径 / fallback 路径 / 框架路径
+        if key.hasPrefix("DYLD_") { return true }
+        // Xcode 通过 launchd XPC 传递的 dyld 注入
+        if key.hasPrefix("__XPC_DYLD_") { return true }
+        // 其它常见 Xcode/调试器 env 标记
+        if key.hasPrefix("OS_ACTIVITY_DT_") { return true }
+        // 内存分析器
+        if key.hasPrefix("MallocStack") { return true }
+        if key == "NSZombieEnabled" { return true }
+        if key == "NSDeallocateZombies" { return true }
+        // Sanitizer ABI shim
+        if key.hasPrefix("LSAN_") || key.hasPrefix("ASAN_") || key.hasPrefix("TSAN_") || key.hasPrefix("UBSAN_") { return true }
+        return false
     }
 
     static func openApplicationCommand(for payload: OpenTargetPayload, resolvedURL: URL) -> OpenApplicationLaunchCommand {
@@ -444,6 +479,7 @@ class ShortcutExecutor {
         let process = Process()
         process.executableURL = url
         process.arguments = ArgumentSplitter.split(payload.arguments)
+        process.environment = Self.sanitizedSubprocessEnvironment()
         do {
             try process.run()
         } catch {
