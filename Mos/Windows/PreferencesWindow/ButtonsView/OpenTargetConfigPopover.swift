@@ -23,17 +23,16 @@ final class OpenTargetConfigPopover: NSObject {
 
     // Views
     private weak var fileSlot: FileSlotView?
-    private weak var argsSection: NSView?
+    private weak var argsStack: NSStackView?     // 容器 NSStackView; 隐藏所有 arrangedSubviews 时整体塌缩到 0 高
+    private weak var argsCaption: NSView?
     private weak var argsField: NSTextField?
     private weak var doneButton: NSButton?
     private weak var staleBanner: NSView?
-    private var argsSectionHeightConstraint: NSLayoutConstraint?
 
     // Layout constants
     private static let contentWidth: CGFloat = 320
     private static let padding: CGFloat = 16
-    private static let slotHeight: CGFloat = 64
-    private static let argsSectionHeight: CGFloat = 45
+    private static let slotHeight: CGFloat = 76
 
     private struct PickedFile {
         let path: String
@@ -91,7 +90,7 @@ final class OpenTargetConfigPopover: NSObject {
     // MARK: - View construction
 
     private func makeViewController(initialArgs: String) -> NSViewController {
-        let vc = NSViewController()
+        let vc = OpenTargetContentViewController()
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -114,29 +113,20 @@ final class OpenTargetConfigPopover: NSObject {
         container.addSubview(slot)
         self.fileSlot = slot
 
-        // Args section (collapsed until a file is selected)
-        let argsSection = NSView()
-        argsSection.translatesAutoresizingMaskIntoConstraints = false
-        argsSection.wantsLayer = true
-        argsSection.layer?.masksToBounds = true
-        argsSection.alphaValue = selectedPath == nil ? 0 : 1
-        container.addSubview(argsSection)
-        self.argsSection = argsSection
-
-        // Args caption
-        let captionStack = NSStackView()
-        captionStack.orientation = .horizontal
-        captionStack.spacing = 0
-        captionStack.translatesAutoresizingMaskIntoConstraints = false
+        // Args caption (NSStackView 内部第一个 arrangedSubview)
+        let captionRow = NSStackView()
+        captionRow.orientation = .horizontal
+        captionRow.spacing = 0
+        captionRow.translatesAutoresizingMaskIntoConstraints = false
         let captionLabel = NSTextField(labelWithString: NSLocalizedString("open-target-arguments-label", comment: ""))
         captionLabel.font = NSFont.systemFont(ofSize: 11)
         captionLabel.textColor = NSColor.labelColor
         let captionSuffix = NSTextField(labelWithString: " " + NSLocalizedString("open-target-arguments-optional-suffix", comment: ""))
         captionSuffix.font = NSFont.systemFont(ofSize: 11)
         captionSuffix.textColor = NSColor.tertiaryLabelColor
-        captionStack.addArrangedSubview(captionLabel)
-        captionStack.addArrangedSubview(captionSuffix)
-        argsSection.addSubview(captionStack)
+        captionRow.addArrangedSubview(captionLabel)
+        captionRow.addArrangedSubview(captionSuffix)
+        self.argsCaption = captionRow
 
         // Args field (monospaced)
         let args = NSTextField()
@@ -149,8 +139,24 @@ final class OpenTargetConfigPopover: NSObject {
         } else {
             args.font = NSFont(name: "Menlo", size: 12) ?? NSFont.systemFont(ofSize: 12)
         }
-        argsSection.addSubview(args)
         self.argsField = args
+
+        // Args section (NSStackView): 隐藏所有 arrangedSubviews 时自身 intrinsic height = 0,
+        // 这是 AppKit 唯一为"动态显隐布局"提供的原生机制. 用普通 NSView + 高度约束 toggle
+        // 试过, fittingSize 会被内部 captionStack/args 的 required 约束牵扯, 算不到 0.
+        let argsStack = NSStackView()
+        argsStack.orientation = .vertical
+        argsStack.alignment = .leading
+        argsStack.spacing = 6
+        argsStack.translatesAutoresizingMaskIntoConstraints = false
+        argsStack.addArrangedSubview(captionRow)
+        argsStack.addArrangedSubview(args)
+        // 初始隐藏 (NSStackView 把 hidden arrangedSubviews 完全踢出布局)
+        let initiallyHidden = (selectedPath == nil)
+        captionRow.isHidden = initiallyHidden
+        args.isHidden = initiallyHidden
+        container.addSubview(argsStack)
+        self.argsStack = argsStack
 
         // Buttons
         let cancel = NSButton(title: NSLocalizedString("open-target-cancel", comment: ""), target: self, action: #selector(onCancelButton))
@@ -167,10 +173,6 @@ final class OpenTargetConfigPopover: NSObject {
         container.addSubview(done)
         self.doneButton = done
 
-        let argsHeight = argsSection.heightAnchor.constraint(equalToConstant: selectedPath == nil ? 0 : Self.argsSectionHeight)
-        argsHeight.isActive = true
-        self.argsSectionHeightConstraint = argsHeight
-
         // Layout
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: Self.contentWidth + Self.padding * 2),
@@ -184,20 +186,14 @@ final class OpenTargetConfigPopover: NSObject {
             slot.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
             slot.heightAnchor.constraint(equalToConstant: Self.slotHeight),
 
-            argsSection.topAnchor.constraint(equalTo: slot.bottomAnchor, constant: 12),
-            argsSection.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.padding),
-            argsSection.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
-
-            captionStack.topAnchor.constraint(equalTo: argsSection.topAnchor),
-            captionStack.leadingAnchor.constraint(equalTo: argsSection.leadingAnchor),
-
-            args.topAnchor.constraint(equalTo: captionStack.bottomAnchor, constant: 6),
-            args.leadingAnchor.constraint(equalTo: argsSection.leadingAnchor),
-            args.trailingAnchor.constraint(equalTo: argsSection.trailingAnchor),
+            argsStack.topAnchor.constraint(equalTo: slot.bottomAnchor, constant: 12),
+            argsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.padding),
+            argsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
             args.heightAnchor.constraint(equalToConstant: 26),
-            args.bottomAnchor.constraint(equalTo: argsSection.bottomAnchor),
+            // 让 args field 占满 argsStack 宽度 (NSStackView .leading 对齐默认按 intrinsic 宽)
+            args.widthAnchor.constraint(equalTo: argsStack.widthAnchor),
 
-            done.topAnchor.constraint(equalTo: argsSection.bottomAnchor, constant: 16),
+            done.topAnchor.constraint(equalTo: argsStack.bottomAnchor, constant: 16),
             done.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.padding),
             done.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.padding),
 
@@ -285,7 +281,8 @@ final class OpenTargetConfigPopover: NSObject {
         let icon = workspace.icon(forFile: url.path)
         let title: String = {
             if selectedIsApplication, let bundle = Bundle(url: url) {
-                return bundle.infoDictionary?["CFBundleDisplayName"] as? String
+                return bundle.localizedDisplayName
+                    ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String
                     ?? bundle.infoDictionary?["CFBundleName"] as? String
                     ?? url.deletingPathExtension().lastPathComponent
             }
@@ -308,35 +305,23 @@ final class OpenTargetConfigPopover: NSObject {
     }
 
     private func setArgumentsVisible(_ visible: Bool, animated: Bool) {
-        argsSectionHeightConstraint?.constant = visible ? Self.argsSectionHeight : 0
+        // 始终瞬时切换. NSPopover 不实现 NSAnimatablePropertyContainer, contentSize
+        // 没有任何动画通道; 任何内部渐变都会与 popover 框架瞬移脱节而撕裂. 同帧瞬时
+        // 完成 → 视觉上没有"先后", 谈不上跳. fileSlot 内部 250ms 渐变保留 (slot 内的
+        // alpha 变化与 popover 框架无关).
+        _ = animated  // intentionally unused
+
         doneButton?.isEnabled = visible && selectedPath != nil
 
-        let updateLayout = { [weak self] in
-            guard let self = self else { return }
-            self.popover?.contentViewController?.view.layoutSubtreeIfNeeded()
-            self.resizePopoverToFit()
-        }
+        // 通过 NSStackView 的 hidden arrangedSubviews 机制塌缩布局: hidden 时整个 stack
+        // intrinsic height = 0, 容器 fittingSize 自然下降. 这是 AppKit 唯一保证 fittingSize
+        // 真实反映"有/无内容"的方式 (普通 NSView + 高度约束 toggle 会被内部 required 约束牵扯).
+        argsCaption?.isHidden = !visible
+        argsField?.isHidden = !visible
 
-        if animated {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                ctx.allowsImplicitAnimation = true
-                self.argsSection?.animator().alphaValue = visible ? 1 : 0
-                updateLayout()
-            }
-        } else {
-            argsSection?.alphaValue = visible ? 1 : 0
-            updateLayout()
-        }
-    }
-
-    private func resizePopoverToFit() {
-        guard let popover = popover,
-              let view = popover.contentViewController?.view else { return }
-        let fittingSize = view.fittingSize
-        guard fittingSize.width > 0, fittingSize.height > 0 else { return }
-        popover.contentSize = fittingSize
+        guard let view = popover?.contentViewController?.view else { return }
+        view.layoutSubtreeIfNeeded()
+        popover?.contentSize = view.fittingSize
     }
 
     @objc private func onDoneButton() {
@@ -399,6 +384,9 @@ final class FileSlotView: NSView {
     private var emptyView: NSView!
     private var filledView: NSView!
     private let borderLayer = CAShapeLayer()
+    private var trackingArea: NSTrackingArea?
+    private var isHovering = false
+    private var isDragHighlighting = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -414,7 +402,6 @@ final class FileSlotView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.masksToBounds = false
-        preserveFrameWhileSettingCenteredAnchorPoint()
         borderLayer.fillColor = nil
         borderLayer.lineDashPattern = [5, 4]
         layer?.addSublayer(borderLayer)
@@ -430,20 +417,61 @@ final class FileSlotView: NSView {
         applyEmptyAppearance()
     }
 
-    private func preserveFrameWhileSettingCenteredAnchorPoint() {
-        guard let layer = layer else { return }
-        let origin = frame.origin
-        layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        frame.origin = origin
-    }
-
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !isHovering else { return }
+        isHovering = true
+        refreshAppearance(animated: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard isHovering else { return }
+        isHovering = false
+        refreshAppearance(animated: true)
+    }
+
+    /// 重新计算 + 应用当前外观, 可选 CALayer 隐式动画.
+    private func refreshAppearance(animated: Bool) {
+        if animated {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.15)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+        }
+        switch state {
+        case .empty: applyEmptyAppearance()
+        case .filled: applyFilledAppearance()
+        }
+        CATransaction.commit()
+    }
+
     override func layout() {
         super.layout()
+        // 在每次 layout 后校准 anchor: AppKit 在 wantsLayer 视图被 re-add 到新 superview /
+        // 其它 layer 重建场景下会把 anchorPoint 重置回 (0,0); 不在此处补偿, 接下来的
+        // scale 动画就会从角落起算. ensureCenterAnchor 是幂等的.
+        ensureCenterAnchor()
         emptyView.frame = bounds
         filledView.frame = bounds
         borderLayer.frame = bounds
@@ -505,18 +533,36 @@ final class FileSlotView: NSView {
     // MARK: Appearance
 
     fileprivate func applyEmptyAppearance() {
-        borderLayer.lineWidth = 1
-        borderLayer.lineDashPattern = [5, 4]
-        borderLayer.strokeColor = NSColor.secondaryLabelColor.withAlphaComponent(0.32).cgColor
-        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.04).cgColor
+        if isDragHighlighting {
+            borderLayer.lineWidth = 1.2
+            borderLayer.lineDashPattern = [5, 4]
+            borderLayer.strokeColor = accentColor.withAlphaComponent(0.45).cgColor
+            layer?.backgroundColor = accentColor.withAlphaComponent(0.05).cgColor
+        } else {
+            borderLayer.lineWidth = 1
+            borderLayer.lineDashPattern = [5, 4]
+            let borderAlpha: CGFloat = isHovering ? 0.55 : 0.32
+            let bgAlpha: CGFloat = isHovering ? 0.07 : 0.04
+            borderLayer.strokeColor = NSColor.secondaryLabelColor.withAlphaComponent(borderAlpha).cgColor
+            layer?.backgroundColor = NSColor.gray.withAlphaComponent(bgAlpha).cgColor
+        }
         toolTip = NSLocalizedString("open-target-empty-tooltip", comment: "")
     }
 
     fileprivate func applyFilledAppearance() {
-        borderLayer.lineWidth = 1
-        borderLayer.lineDashPattern = [5, 4]
-        borderLayer.strokeColor = NSColor.secondaryLabelColor.withAlphaComponent(0.24).cgColor
-        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.03).cgColor
+        if isDragHighlighting {
+            borderLayer.lineWidth = 1.2
+            borderLayer.lineDashPattern = [5, 4]
+            borderLayer.strokeColor = accentColor.withAlphaComponent(0.45).cgColor
+            layer?.backgroundColor = accentColor.withAlphaComponent(0.05).cgColor
+        } else {
+            borderLayer.lineWidth = 1
+            borderLayer.lineDashPattern = [5, 4]
+            let borderAlpha: CGFloat = isHovering ? 0.5 : 0.24
+            let bgAlpha: CGFloat = isHovering ? 0.06 : 0.03
+            borderLayer.strokeColor = NSColor.secondaryLabelColor.withAlphaComponent(borderAlpha).cgColor
+            layer?.backgroundColor = NSColor.gray.withAlphaComponent(bgAlpha).cgColor
+        }
         toolTip = NSLocalizedString("open-target-filled-tooltip", comment: "")
     }
 
@@ -550,8 +596,8 @@ final class FileSlotView: NSView {
 
         container.addSubview(stack)
         NSLayoutConstraint.activate([
-            placeholder.widthAnchor.constraint(equalToConstant: 24),
-            placeholder.heightAnchor.constraint(equalToConstant: 24),
+            placeholder.widthAnchor.constraint(equalToConstant: 18),
+            placeholder.heightAnchor.constraint(equalToConstant: 18),
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
@@ -600,7 +646,7 @@ final class FileSlotView: NSView {
         container.addSubview(subtitle)
         self.filledSubtitle = subtitle
 
-        let clearBtn = NSButton()
+        let clearBtn = HoverableClearButton()
         clearBtn.tag = 99  // used in mouseDown hit test
         clearBtn.bezelStyle = .inline
         clearBtn.isBordered = false
@@ -608,9 +654,6 @@ final class FileSlotView: NSView {
             clearBtn.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
         } else {
             clearBtn.title = "✕"
-        }
-        if #available(macOS 10.14, *) {
-            clearBtn.contentTintColor = NSColor.tertiaryLabelColor
         }
         clearBtn.toolTip = NSLocalizedString("open-target-clear-tooltip", comment: "")
         clearBtn.target = self
@@ -656,11 +699,8 @@ final class FileSlotView: NSView {
         guard let first = firstDraggedFileURL(sender), isAcceptedDraggedFile(first) else {
             return []
         }
-        // Visual: soft accent border + center-origin scale up
-        borderLayer.lineWidth = 1.2
-        borderLayer.lineDashPattern = [5, 4]
-        borderLayer.strokeColor = accentColor.withAlphaComponent(0.45).cgColor
-        layer?.backgroundColor = accentColor.withAlphaComponent(0.05).cgColor
+        isDragHighlighting = true
+        refreshAppearance(animated: true)
         animateScale(to: 1.02)
         return .copy
     }
@@ -705,19 +745,112 @@ final class FileSlotView: NSView {
     }
 
     private func animateScale(to scale: CGFloat) {
+        guard let layer = layer else { return }
+        // Apple 实际行为: effective_transform = T(anchor_own) × t_user × T(-anchor_own).
+        // 试图用复合变换在 anchor=(0,0) 时模拟中心枢轴会被这层包裹反向抵消.
+        // 唯一可靠路径: 把 anchor 真实改成 (0.5, 0.5), 同步补偿 position 保证 frame 不跳动,
+        // 之后直接 CATransform3DMakeScale 就是中心枢轴的简单 scale.
+        ensureCenterAnchor()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
-            self.layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+            layer.transform = abs(scale - 1.0) < 0.001
+                ? CATransform3DIdentity
+                : CATransform3DMakeScale(scale, scale, 1)
         }
     }
 
-    private func revertDragVisual() {
-        animateScale(to: 1.0)
-        switch state {
-        case .empty: applyEmptyAppearance()
-        case .filled: applyFilledAppearance()
+    /// 把 layer.anchorPoint 校准到 (0.5, 0.5), 同时补偿 position 让 frame 不视觉跳动.
+    /// 幂等: 已在中心则跳过. 在 layout() 和 animateScale() 入口都调用, 对抗 AppKit
+    /// 在 view 被 re-add / layer 被重建等场景下重置 anchor.
+    private func ensureCenterAnchor() {
+        guard let layer = layer else { return }
+        let target = CGPoint(x: 0.5, y: 0.5)
+        if abs(layer.anchorPoint.x - target.x) < 0.001 &&
+           abs(layer.anchorPoint.y - target.y) < 0.001 {
+            return
         }
+        let bounds = layer.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return }  // frame 还未确定时跳过
+        let oldAnchor = layer.anchorPoint
+        layer.anchorPoint = target
+        layer.position = CGPoint(
+            x: layer.position.x + (target.x - oldAnchor.x) * bounds.width,
+            y: layer.position.y + (target.y - oldAnchor.y) * bounds.height
+        )
+    }
+
+    private func revertDragVisual() {
+        isDragHighlighting = false
+        animateScale(to: 1.0)
+        refreshAppearance(animated: true)
+    }
+}
+
+// MARK: - Content view controller
+
+/// 普通 NSViewController, 不在 viewDidLayout 里自动设 preferredContentSize.
+///
+/// 之前这里曾在 viewDidLayout 同步 preferredContentSize, 但发现:
+/// 1. setArgumentsVisible 里 layoutSubtreeIfNeeded() 会触发 viewDidLayout
+/// 2. viewDidLayout 把 preferredContentSize 设到当前 fittingSize
+/// 3. 这条路径与我显式 popover.contentSize = view.fittingSize 抢同一个目标值;
+///    NSPopover 内部对二者协同有未文档化的状态机, 实测会让 popover 在收回时卡尺寸.
+/// 现在只保留 setArgumentsVisible 里的显式赋值作为唯一权威源.
+private final class OpenTargetContentViewController: NSViewController {}
+
+// MARK: - Hoverable clear button
+
+/// 文件槽内的 ✕ 按钮: 默认 tertiaryLabelColor, hover 时切到 systemRed,
+/// 通过 NSTrackingArea 监听 mouse enter/exit 触发 contentTintColor 变化.
+private final class HoverableClearButton: NSButton {
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        applyTint(hovering: false, animated: false)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        applyTint(hovering: false, animated: false)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        applyTint(hovering: true, animated: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        applyTint(hovering: false, animated: true)
+    }
+
+    private func applyTint(hovering: Bool, animated: Bool) {
+        guard #available(macOS 10.14, *) else { return }
+        if animated {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.15)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+        }
+        contentTintColor = hovering ? NSColor.systemRed : NSColor.tertiaryLabelColor
+        CATransaction.commit()
     }
 }

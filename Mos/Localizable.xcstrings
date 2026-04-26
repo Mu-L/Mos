@@ -7215,13 +7215,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "or drag one here"
+            "value" : "or drop a file here"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "或拖拽到此处"
+            "value" : "也可拖入文件"
           }
         }
       }

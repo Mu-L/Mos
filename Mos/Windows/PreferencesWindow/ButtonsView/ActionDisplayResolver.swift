@@ -169,7 +169,7 @@ struct ActionDisplayResolver {
     }
 }
 
-private extension Bundle {
+extension Bundle {
     var localizedDisplayName: String? {
         return localizedInfoDictionary?["CFBundleDisplayName"] as? String
             ?? localizedInfoDictionary?["CFBundleName"] as? String
