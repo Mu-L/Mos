@@ -31,6 +31,12 @@ final class OpenTargetConfigPopover: NSObject {
     private static let padding: CGFloat = 16
     private static let slotHeight: CGFloat = 64
 
+    private struct PickedFile {
+        let path: String
+        let bundleID: String?
+        let isApplication: Bool
+    }
+
     // MARK: - Show
 
     func show(at sourceView: NSView, existing: OpenTargetPayload?) {
@@ -71,6 +77,10 @@ final class OpenTargetConfigPopover: NSObject {
         slot.translatesAutoresizingMaskIntoConstraints = false
         slot.onClick = { [weak self] in self?.onFileSlotClicked() }
         slot.onClear = { [weak self] in self?.onFileSlotCleared() }
+        slot.onDrop = { [weak self] url in
+            guard let self = self, let picked = Self.resolvePickedFile(at: url) else { return }
+            self.applyPickedFile(picked)
+        }
         container.addSubview(slot)
         self.fileSlot = slot
 
@@ -150,8 +160,44 @@ final class OpenTargetConfigPopover: NSObject {
     // MARK: - Interactions (placeholders for Tasks 10-11)
 
     private func onFileSlotClicked() {
-        // Real NSOpenPanel handler arrives in Task 11
-        NSLog("OpenTargetConfigPopover: file slot clicked (NSOpenPanel TODO)")
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = NSLocalizedString("open-target-panel-prompt", comment: "")
+        panel.message = NSLocalizedString("open-target-panel-message", comment: "")
+        // 不限制扩展名: 接受 .app, .sh, .py, 任意可执行文件
+
+        guard let popoverWindow = popover?.contentViewController?.view.window else {
+            // Fallback: 模态运行
+            if panel.runModal() == .OK, let url = panel.url, let picked = Self.resolvePickedFile(at: url) {
+                applyPickedFile(picked)
+            }
+            return
+        }
+        panel.beginSheetModal(for: popoverWindow) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            if let picked = Self.resolvePickedFile(at: url) {
+                self.applyPickedFile(picked)
+            }
+        }
+    }
+
+    /// 解析任意文件 URL 为待保存的字段集; 返回 nil 表示路径无效.
+    private static func resolvePickedFile(at url: URL) -> PickedFile? {
+        var isDirectory: ObjCBool = false
+        let isApp = url.pathExtension.lowercased() == "app"
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue || isApp else { return nil }
+        let bundleID = isApp ? Bundle(url: url)?.bundleIdentifier : nil
+        return PickedFile(path: url.path, bundleID: bundleID, isApplication: isApp)
+    }
+
+    private func applyPickedFile(_ picked: PickedFile) {
+        selectedPath = picked.path
+        selectedBundleID = picked.bundleID
+        selectedIsApplication = picked.isApplication
+        applyFilledStateForCurrentSelection(animated: true)
     }
 
     private func applyFilledStateForCurrentSelection(animated: Bool) {
@@ -208,6 +254,8 @@ final class FileSlotView: NSView {
 
     var onClick: (() -> Void)?
     var onClear: (() -> Void)?
+    /// Drop callback exposed to the popover.
+    var onDrop: ((URL) -> Void)?
 
     private(set) var state: State = .empty
 
@@ -255,6 +303,7 @@ final class FileSlotView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.cornerRadius = 8
+        registerForDraggedTypes([.fileURL])
 
         emptyView = makeEmptyView()
         filledView = makeFilledView()
@@ -453,5 +502,73 @@ final class FileSlotView: NSView {
 
     @objc private func onClearClicked() {
         onClear?()
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let first = firstDraggedFileURL(sender), isAcceptedDraggedFile(first) else {
+            return []
+        }
+        // Visual: accent border + scale up
+        layer?.borderWidth = 1.5
+        layer?.borderColor = accentColor.cgColor
+        layer?.backgroundColor = accentColor.withAlphaComponent(0.08).cgColor
+        animateScale(to: 1.02)
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        revertDragVisual()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { revertDragVisual() }
+        guard let first = firstDraggedFileURL(sender), isAcceptedDraggedFile(first) else {
+            return false
+        }
+        onDrop?(first)
+        return true
+    }
+
+    private func firstDraggedFileURL(_ sender: NSDraggingInfo) -> URL? {
+        guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
+            return nil
+        }
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else {
+            return nil
+        }
+        return urls.first
+    }
+
+    private func isAcceptedDraggedFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        let isApp = url.pathExtension.lowercased() == "app"
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        return !isDirectory.boolValue || isApp
+    }
+
+    private var accentColor: NSColor {
+        if #available(macOS 10.14, *) {
+            return NSColor.controlAccentColor
+        }
+        return NSColor.alternateSelectedControlColor
+    }
+
+    private func animateScale(to scale: CGFloat) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.allowsImplicitAnimation = true
+            self.layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+        }
+    }
+
+    private func revertDragVisual() {
+        animateScale(to: 1.0)
+        switch state {
+        case .empty: applyEmptyAppearance()
+        case .filled: applyFilledAppearance()
+        }
     }
 }
