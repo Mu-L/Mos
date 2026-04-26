@@ -323,7 +323,9 @@ final class OpenTargetConfigPopover: NSObject {
         // alpha 变化与 popover 框架无关).
         _ = animated  // intentionally unused
 
-        doneButton?.isEnabled = visible && selectedPath != nil
+        // 注: 不在这里管 doneButton.isEnabled. done 的启用条件是 "selectedPath != nil",
+        // 与 args 显隐无关 (kind=.file 时 args 被隐藏但 done 仍应可用).
+        // doneButton.isEnabled 由调用方 (applyFilledStateForCurrentSelection / onFileSlotCleared) 管理.
 
         // 通过 NSStackView 的 hidden arrangedSubviews 机制塌缩布局: hidden 时整个 stack
         // intrinsic height = 0, 容器 fittingSize 自然下降. 这是 AppKit 唯一保证 fittingSize

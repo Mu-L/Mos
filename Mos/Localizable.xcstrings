@@ -7079,13 +7079,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Application…"
+            "value" : "Open…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开应用…"
+            "value" : "打开…"
           }
         }
       }
