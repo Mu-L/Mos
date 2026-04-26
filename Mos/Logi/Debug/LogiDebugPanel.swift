@@ -1996,7 +1996,7 @@ extension LogiDebugPanel: NSOutlineViewDelegate {
 
         var segments: [String] = []
         if !node.isReceiver {
-            segments.append(session.debugIsBLE ? "Bluetooth" : "USB")
+            segments.append(session.debugIsBLE ? "BLE" : "USB")
             segments.append(interfaceRole(for: session))
         }
         if session.isHIDPPCandidate {
