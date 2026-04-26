@@ -187,14 +187,43 @@ extension Options {
             }
             return []
         }
+        return Self.decodeButtonBindings(from: data)
+    }
 
-        do {
-            return try decoder.decode([ButtonBinding].self, from: data)
-        } catch {
-            NSLog("Failed to decode button bindings data: \(error), resetting to defaults")
-            UserDefaults.standard.removeObject(forKey: OptionItem.Button.Bindings)
+    /// 容错解码 button binding 数组.
+    ///
+    /// - 外层不是 JSON 数组 → 返回空, 视作配置丢失
+    /// - 单个 binding 解析失败 → 跳过它, 其他保留, NSLog 记录跳过数
+    ///
+    /// 这种 per-binding 容错设计支持向前兼容: 未来 Mos 版本写入的未知 payload
+    /// 不会导致整组绑定被擦掉.
+    static func decodeButtonBindings(from data: Data) -> [ButtonBinding] {
+        guard let elements = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+            NSLog("Button bindings data is not a JSON array, returning empty")
             return []
         }
+        let decoder = JSONDecoder()
+        var bindings: [ButtonBinding] = []
+        var skippedCount = 0
+        for element in elements {
+            guard JSONSerialization.isValidJSONObject(element) else {
+                skippedCount += 1
+                continue
+            }
+            guard let elementData = try? JSONSerialization.data(withJSONObject: element) else {
+                skippedCount += 1
+                continue
+            }
+            if let binding = try? decoder.decode(ButtonBinding.self, from: elementData) {
+                bindings.append(binding)
+            } else {
+                skippedCount += 1
+            }
+        }
+        if skippedCount > 0 {
+            NSLog("Skipped \(skippedCount) unparseable button binding(s) (likely from a future Mos version)")
+        }
+        return bindings
     }
 
     // 保存按钮绑定数据
