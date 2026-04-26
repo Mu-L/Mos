@@ -29,7 +29,29 @@ struct ActionDisplayRenderer {
             let badgeImage = Self.createBadgeImage(from: presentation.badgeComponents)
             let finalImage = prefixedImageIfNeeded(badgeImage, brand: presentation.brand)
             apply(title: presentation.title, image: finalImage, placeholderItem: placeholderItem, popupButton: popupButton)
+
+        case .openTarget:
+            let resizedImage = presentation.image.map { Self.resizeForBadge($0) }
+            apply(title: presentation.title, image: resizedImage, placeholderItem: placeholderItem, popupButton: popupButton)
         }
+    }
+
+    /// Resize an arbitrary NSImage to match the visual size of system shortcut icons (badge height 17pt).
+    private static func resizeForBadge(_ image: NSImage) -> NSImage {
+        let badgeHeight: CGFloat = 17
+        let originalSize = image.size
+        guard originalSize.height > 0 else { return image }
+        let scale = badgeHeight / originalSize.height
+        let newSize = NSSize(width: originalSize.width * scale, height: badgeHeight)
+
+        let resized = NSImage(size: newSize)
+        resized.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize),
+                   from: NSRect(origin: .zero, size: originalSize),
+                   operation: .sourceOver,
+                   fraction: 1.0)
+        resized.unlockFocus()
+        return resized
     }
 
     private func apply(

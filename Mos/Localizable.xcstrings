@@ -7090,6 +7090,23 @@
         }
       }
     },
+    "open-target-placeholder-stale" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(unavailable)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(应用已失效)"
+          }
+        }
+      }
+    },
     "paste" : {
       "extractionState" : "manual",
       "localizations" : {

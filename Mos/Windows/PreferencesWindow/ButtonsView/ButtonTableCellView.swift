@@ -36,6 +36,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private var onDeleteRequested: (() -> Void)?
     private var onCustomShortcutRecorded: ((String) -> Void)?
     private var currentCustomName: String?
+    private var currentOpenTarget: OpenTargetPayload?
     private var isCustomRecordingActive = false
 
     // MARK: - Custom Recording
@@ -65,6 +66,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         isCustomRecordingActive = false
         self.currentShortcut = binding.systemShortcut
         self.currentCustomName = binding.isCustomBinding ? binding.systemShortcutName : nil
+        self.currentOpenTarget = binding.openTarget
 
         // 保存原始背景色（首次或复用时）
         if originalRowBackgroundColor == nil, let rowView = self.superview as? NSTableRowView {
@@ -420,7 +422,8 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         let presentation = actionDisplayResolver.resolve(
             shortcut: currentShortcut,
             customBindingName: currentCustomName,
-            isRecording: isCustomRecordingActive
+            isRecording: isCustomRecordingActive,
+            openTarget: currentOpenTarget
         )
         actionDisplayRenderer.render(presentation, into: actionPopUpButton)
     }
@@ -458,6 +461,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
 
         // 清除自定义绑定状态
         self.currentCustomName = nil
+        self.currentOpenTarget = nil
 
         // representedObject 为 nil 时表示用户选择了"未绑定"
         let shortcut = sender.representedObject as? SystemShortcut.Shortcut
@@ -592,6 +596,7 @@ extension ButtonTableCellView: KeyRecorderDelegate {
             self.isCustomRecordingActive = false
             self.currentShortcut = nil
             self.currentCustomName = customName
+            self.currentOpenTarget = nil
             self.refreshActionDisplay()
             self.onCustomShortcutRecorded?(customName)
             // 重绘虚线和冲突指示器

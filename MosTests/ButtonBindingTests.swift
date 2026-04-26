@@ -303,6 +303,65 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertNotNil(popupButton.menu?.items.first?.image)
     }
 
+    // MARK: - ActionPresentation openTarget
+
+    func testActionDisplayResolver_returnsOpenTargetKindWhenPayloadProvided() {
+        let payload = OpenTargetPayload(
+            path: "/Applications/Safari.app",
+            bundleID: "com.apple.Safari",
+            arguments: "",
+            isApplication: true
+        )
+        let presentation = ActionDisplayResolver().resolve(
+            shortcut: nil,
+            customBindingName: nil,
+            isRecording: false,
+            openTarget: payload
+        )
+        XCTAssertEqual(presentation.kind, .openTarget)
+        // Title should be either the file's basename or app displayName — both acceptable.
+        XCTAssertFalse(presentation.title.isEmpty)
+    }
+
+    func testActionDisplayResolver_openTargetStalePathProducesUnavailableTitle() {
+        let payload = OpenTargetPayload(
+            path: "/totally-fake-path-do-not-exist.app",
+            bundleID: "com.does.not.exist",
+            arguments: "",
+            isApplication: true
+        )
+        let presentation = ActionDisplayResolver().resolve(
+            shortcut: nil,
+            customBindingName: nil,
+            isRecording: false,
+            openTarget: payload
+        )
+        XCTAssertEqual(presentation.kind, .openTarget)
+        XCTAssertTrue(
+            presentation.title.contains(NSLocalizedString("open-target-placeholder-stale", comment: ""))
+                || presentation.title.contains("totally-fake-path-do-not-exist"),
+            "Stale path should produce either filename + (unavailable) suffix or just '(unavailable)'; got: \(presentation.title)"
+        )
+    }
+
+    func testActionDisplayRenderer_rendersOpenTargetWithImage() {
+        let popupButton = makeActionPopupButton()
+        let stubImage = NSImage(size: NSSize(width: 16, height: 16))
+        let presentation = ActionPresentation(
+            kind: .openTarget,
+            title: "Safari",
+            symbolName: nil,
+            image: stubImage,
+            badgeComponents: [],
+            brand: nil
+        )
+
+        ActionDisplayRenderer().render(presentation, into: popupButton)
+
+        XCTAssertEqual(popupButton.menu?.items.first?.title, "Safari")
+        XCTAssertNotNil(popupButton.menu?.items.first?.image)
+    }
+
     func testBuildShortcutMenu_includesModifierCategoryWithSingleModifierShortcuts() {
         let menu = NSMenu()
         let target = ShortcutMenuTestTarget()

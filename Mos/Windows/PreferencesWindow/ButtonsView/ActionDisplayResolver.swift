@@ -2,9 +2,6 @@
 //  ActionDisplayResolver.swift
 //  Mos
 //
-//  Created by Mos on 2026/4/12.
-//  Copyright © 2026 Caldis. All rights reserved.
-//
 
 import Cocoa
 
@@ -13,14 +10,32 @@ enum ActionPresentationKind: Equatable {
     case recordingPrompt
     case namedAction
     case keyCombo
+    case openTarget
 }
 
 struct ActionPresentation {
     let kind: ActionPresentationKind
     let title: String
     let symbolName: String?
+    let image: NSImage?
     let badgeComponents: [String]
     let brand: BrandTagConfig?
+
+    init(
+        kind: ActionPresentationKind,
+        title: String,
+        symbolName: String? = nil,
+        image: NSImage? = nil,
+        badgeComponents: [String] = [],
+        brand: BrandTagConfig? = nil
+    ) {
+        self.kind = kind
+        self.title = title
+        self.symbolName = symbolName
+        self.image = image
+        self.badgeComponents = badgeComponents
+        self.brand = brand
+    }
 }
 
 struct ActionDisplayResolver {
@@ -28,16 +43,18 @@ struct ActionDisplayResolver {
     func resolve(
         shortcut: SystemShortcut.Shortcut?,
         customBindingName: String?,
-        isRecording: Bool
+        isRecording: Bool,
+        openTarget: OpenTargetPayload? = nil
     ) -> ActionPresentation {
         if isRecording {
             return ActionPresentation(
                 kind: .recordingPrompt,
-                title: NSLocalizedString("custom-recording-prompt", comment: ""),
-                symbolName: nil,
-                badgeComponents: [],
-                brand: nil
+                title: NSLocalizedString("custom-recording-prompt", comment: "")
             )
+        }
+
+        if let openTarget {
+            return openTargetPresentation(for: openTarget)
         }
 
         if let shortcut {
@@ -56,10 +73,7 @@ struct ActionDisplayResolver {
 
         return ActionPresentation(
             kind: .unbound,
-            title: NSLocalizedString("unbound", comment: ""),
-            symbolName: nil,
-            badgeComponents: [],
-            brand: nil
+            title: NSLocalizedString("unbound", comment: "")
         )
     }
 
@@ -68,8 +82,46 @@ struct ActionDisplayResolver {
             kind: .namedAction,
             title: shortcut.localizedName,
             symbolName: shortcut.symbolName,
-            badgeComponents: [],
             brand: BrandTag.brandForAction(shortcut.identifier)
+        )
+    }
+
+    private func openTargetPresentation(for payload: OpenTargetPayload) -> ActionPresentation {
+        let workspace = NSWorkspace.shared
+        let resolvedURL: URL? = {
+            if let bundleID = payload.bundleID,
+               let url = workspace.urlForApplication(withBundleIdentifier: bundleID) {
+                return url
+            }
+            let url = URL(fileURLWithPath: payload.path)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }()
+
+        let title: String
+        let icon: NSImage?
+        if let url = resolvedURL {
+            if payload.isApplication, let bundle = Bundle(url: url) {
+                title = bundle.localizedDisplayName
+                    ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String
+                    ?? bundle.infoDictionary?["CFBundleName"] as? String
+                    ?? url.deletingPathExtension().lastPathComponent
+            } else {
+                title = url.lastPathComponent
+            }
+            icon = workspace.icon(forFile: url.path)
+        } else {
+            // Stale path: show filename + unavailable marker
+            let basename = (payload.path as NSString).lastPathComponent
+            let staleTag = NSLocalizedString("open-target-placeholder-stale", comment: "")
+            title = basename.isEmpty ? staleTag : "\(basename) \(staleTag)"
+            icon = nil
+        }
+
+        return ActionPresentation(
+            kind: .openTarget,
+            title: title,
+            symbolName: nil,
+            image: icon
         )
     }
 
@@ -83,8 +135,6 @@ struct ActionDisplayResolver {
             return ActionPresentation(
                 kind: .namedAction,
                 title: (LogiCenter.shared.name(forMosCode: code) ?? ""),
-                symbolName: nil,
-                badgeComponents: [],
                 brand: brand
             )
         }
@@ -106,7 +156,6 @@ struct ActionDisplayResolver {
         return ActionPresentation(
             kind: .keyCombo,
             title: "",
-            symbolName: nil,
             badgeComponents: badgeComponents,
             brand: brand
         )
@@ -117,5 +166,12 @@ struct ActionDisplayResolver {
             return .keyboard
         }
         return code >= 0x100 ? .mouse : .keyboard
+    }
+}
+
+private extension Bundle {
+    var localizedDisplayName: String? {
+        return localizedInfoDictionary?["CFBundleDisplayName"] as? String
+            ?? localizedInfoDictionary?["CFBundleName"] as? String
     }
 }
