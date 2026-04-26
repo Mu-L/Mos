@@ -1551,7 +1551,7 @@ class LogiDeviceSession {
     // MARK: - GetControlReporting Query (function 2)
 
     /// 重跑 GetControlReporting 循环,刷新所有 control 的 reportingFlags / targetCID.
-    /// 用于 UI 轮询冲突状态时调用(通过 LogiSessionManager.refreshReportingStatesIfNeeded 防抖).
+    /// 用于 UI 轮询冲突状态时调用(通过 LogiSessionManager.refreshReportingStates 节流).
     /// 不重新发现 feature / control,开销小(只是 N 个 HID++ 请求).
     /// 前提:初始 discovery 必须已完成;否则无 featureIndex / discoveredControls,直接跳过.
     /// 进行中(timer 未 nil)也跳过,避免 reportingQueryIndex 被重置导致错位.

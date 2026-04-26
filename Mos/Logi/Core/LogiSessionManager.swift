@@ -195,13 +195,13 @@ internal class LogiSessionManager {
     private var lastReportingRefresh: Date?
 
     /// Coalesced 入口:刷新所有 HID++ session 的 reporting 状态 (重跑 GetControlReporting).
-    /// UI 触发点可随意调用,manager 内部按 `reportingRefreshMinInterval` 防抖.
-    /// 同步返回,不阻塞 UI — 实际 HID++ 请求在各自 session 的 input-report 回调里异步处理,
-    /// 完成后通过 `reportingQueryDidCompleteNotification` 刷新 indicator.
-    /// 优化: 没有任何 Logi 绑定时没人会看到冲突图标,直接跳过以省去无谓的 HID++ 往返
-    /// (对没 Logi 鼠标的用户自动生效, 因为此时 sessions 也必然为空).
-    func refreshReportingStatesIfNeeded() {
-        if LogiCenter.shared.registry.aggregatedCacheIsEmpty { return }
+    /// 调用方决定时机 (例如 UI 想看冲突图标), manager 只负责执行 + 节流.
+    ///
+    /// 节流: `reportingRefreshMinInterval` (~3s) 内重复调用直接返回, 防 UI 抖动.
+    /// 没 Logi 候选会话时自然 no-op (sessions filter 后为空集合).
+    /// 同步返回, 不阻塞 UI — 实际 HID++ 请求在各自 session 的 input-report 回调里
+    /// 异步处理, 完成后通过 `reportingQueryDidCompleteNotification` 刷新 indicator.
+    func refreshReportingStates() {
         if let last = lastReportingRefresh,
            Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
         lastReportingRefresh = Date()

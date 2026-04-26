@@ -78,7 +78,7 @@ final class LogiCenter {
     func executeDPICycle(direction: Direction) { manager.executeDPICycle(direction: direction) }
 
     // MARK: - Reporting refresh
-    func refreshReportingStatesIfNeeded() { manager.refreshReportingStatesIfNeeded() }
+    func refreshReportingStates() { manager.refreshReportingStates() }
 
     // MARK: - Debug panel
     func showDebugPanel() {

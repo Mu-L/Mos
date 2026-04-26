@@ -70,7 +70,7 @@ class PreferencesButtonsViewController: NSViewController {
         // 设置录制按钮回调
         setupRecordButtonCallback()
         // 触发一次冲突状态刷新 (30s 内最多跑一次,异步)
-        LogiCenter.shared.refreshReportingStatesIfNeeded()
+        LogiCenter.shared.refreshReportingStates()
         // 面板出现时同步一次当前 busy 状态, 避免错过此前发出的通知
         syncActivityIndicatorWithManager()
     }
