@@ -1370,6 +1370,14 @@ class LogiDebugPanel: NSObject {
                 // disappeared, deselect rather than silently jumping to the device row —
                 // that would strip target-slot context without the user noticing.
                 outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            } else if selectedItem == nil,
+                      let session = currentSession,
+                      let row = row(for: .device(sessionID: ObjectIdentifier(session)), in: outlineView) {
+                // First open / no prior selection: the right pane is already
+                // populated with `currentSession` (auto-picked at lines ~1353-1361),
+                // so highlight the matching sidebar row to avoid the visual mismatch
+                // of "right pane shows a device but left pane has nothing selected".
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             } else {
                 outlineView.deselectAll(nil)
             }
