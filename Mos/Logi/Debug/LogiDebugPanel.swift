@@ -221,7 +221,17 @@ class LogiDebugPanel: NSObject {
 
     // MARK: - State
 
-    private var currentSession: LogiDeviceSession?
+    /// Single source of truth: the outline view's currently selected row.
+    /// Derives the active session from whichever DeviceNode / SlotNode is
+    /// highlighted in the sidebar. Mutations go through `selectRowIndexes` —
+    /// never assign here.
+    private var currentSession: LogiDeviceSession? {
+        guard let outlineView = outlineView, outlineView.selectedRow >= 0 else { return nil }
+        let item = outlineView.item(atRow: outlineView.selectedRow)
+        if let node = item as? DeviceNode { return node.session }
+        if let node = item as? SlotNode   { return node.session }
+        return nil
+    }
     private var logTypeFilter: Set<LogEntryType> = Set(LogEntryType.allCases)
     /// 记录上次已渲染的 filteredLog 行数, 用于 logNotification 走增量 insertRows 而非整表 reload.
     /// 断点条件 (过滤变化 / 清空 / buffer 到达 maxLogLines 触发前置裁剪) 时回落 reloadData.
@@ -253,7 +263,7 @@ class LogiDebugPanel: NSObject {
         init(session: LogiDeviceSession, slot: UInt8) { self.session = session; self.slot = slot }
     }
 
-    private enum SidebarSelection {
+    private enum SidebarSelection: Equatable {
         case device(sessionID: ObjectIdentifier)
         case slot(sessionID: ObjectIdentifier, slot: UInt8)
     }
@@ -538,8 +548,8 @@ class LogiDebugPanel: NSObject {
         guard row >= 0 else { return }
         let item = outlineView.item(atRow: row)
 
-        if let node = item as? DeviceNode {
-            currentSession = node.session
+        if item is DeviceNode {
+            // currentSession is computed from outlineView.selectedRow — already reflects this click.
             selectedFeatureId = nil
             selectedControlCID = nil
             refreshRightPanels()
@@ -548,7 +558,7 @@ class LogiDebugPanel: NSObject {
             let paired = slot.session.debugReceiverPairedDevices
             let idx = Int(slot.slot) - 1
             guard idx >= 0, idx < paired.count, paired[idx].isConnected else { return }
-            currentSession = slot.session
+            // currentSession likewise derived from selection.
             slot.session.setTargetSlot(slot: slot.slot)
             refreshRightPanelsLoading()
             slot.session.rediscoverFeatures()
@@ -1349,31 +1359,45 @@ class LogiDebugPanel: NSObject {
                 outlineView?.expandItem(node)
             }
         }
-        // If current session disconnected, select first remaining device and clear selection state
-        if let cs = currentSession, !sessions.contains(where: { $0 === cs }) {
-            currentSession = deviceNodes.first?.session
+        // Selection IS the source of truth for currentSession. Decide the target
+        // row deterministically and let the outlineView's selection drive the
+        // right pane on the next refresh.
+        guard let outlineView = outlineView else { return }
+        let target = chooseSelectionTarget(prior: selectedItem, sessions: sessions, in: outlineView)
+        if let target = target, let row = row(for: target, in: outlineView) {
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            outlineView.deselectAll(nil)
+        }
+        if target != selectedItem {
+            // Selection moved (first open, prior session disconnected, or slot row vanished).
+            // Drop stale feature/control highlights so the right pane recomputes cleanly.
             selectedFeatureId = nil
             selectedControlCID = nil
         }
-        if currentSession == nil {
-            currentSession = deviceNodes.first?.session
-            selectedFeatureId = nil
-            selectedControlCID = nil
+    }
+
+    /// Pick the next sidebar selection after a `reloadData`.
+    /// 1. Restore the prior selection if its row still exists.
+    /// 2. If the prior was a slot row that vanished but the parent device is still
+    ///    around, fall back to that device row (preserves session context rather
+    ///    than dropping the user back to "nothing selected").
+    /// 3. Otherwise (first open, prior session gone, etc.): pick the first device.
+    /// 4. No devices reachable → no selection.
+    private func chooseSelectionTarget(prior: SidebarSelection?,
+                                       sessions: [LogiDeviceSession],
+                                       in outlineView: NSOutlineView) -> SidebarSelection? {
+        if let prior = prior, row(for: prior, in: outlineView) != nil {
+            return prior
         }
-        if let outlineView = outlineView {
-            if let prev = selectedItem, let row = row(for: prev, in: outlineView) {
-                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            } else if case .device? = selectedItem,
-                      let session = currentSession,
-                      let row = row(for: .device(sessionID: ObjectIdentifier(session)), in: outlineView) {
-                // Device-row fallback only. If the previous selection was a slot that
-                // disappeared, deselect rather than silently jumping to the device row —
-                // that would strip target-slot context without the user noticing.
-                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            } else {
-                outlineView.deselectAll(nil)
-            }
+        if case let .slot(sessionID, _)? = prior,
+           sessions.contains(where: { ObjectIdentifier($0) == sessionID }) {
+            return .device(sessionID: sessionID)
         }
+        if let first = deviceNodes.first {
+            return .device(sessionID: ObjectIdentifier(first.session))
+        }
+        return nil
     }
 
     private func refreshDeviceInfo() {
