@@ -15,6 +15,7 @@ class PreferencesButtonsViewController: NSViewController {
 
     // MARK: - Data
     private var buttonBindings: [ButtonBinding] = []
+    private var currentOpenTargetPopover: OpenTargetConfigPopover?
 
     // MARK: - UI Elements
     // 表格
@@ -258,10 +259,19 @@ extension PreferencesButtonsViewController: NSTableViewDelegate, NSTableViewData
                 onCustomShortcutRecorded: { [weak self] customName in
                     self?.updateButtonBinding(id: binding.id, withCustomName: customName)
                 },
-                onOpenTargetSelectionRequested: { [weak self] in
-                    // Stub — real popover lands in Task 12
-                    NSLog("OpenTargetConfigPopover: stub — would show popover for binding id=\(binding.id)")
-                    _ = self  // silence unused warning
+                onOpenTargetSelectionRequested: { [weak self, weak cell] in
+                    // Temporary skeleton wiring — final persistence lands in Task 12
+                    guard let self = self, let sourceView = cell?.actionPopUpButton else { return }
+                    let popover = OpenTargetConfigPopover()
+                    self.currentOpenTargetPopover = popover
+                    popover.onCommit = { [weak self] payload in
+                        NSLog("OpenTargetConfigPopover: commit (skeleton) — \(payload)")
+                        self?.currentOpenTargetPopover = nil
+                    }
+                    popover.onCancel = { [weak self] in
+                        self?.currentOpenTargetPopover = nil
+                    }
+                    popover.show(at: sourceView, existing: nil)
                 },
                 onDeleteRequested: { [weak self] in
                     self?.removeButtonBinding(id: binding.id)
