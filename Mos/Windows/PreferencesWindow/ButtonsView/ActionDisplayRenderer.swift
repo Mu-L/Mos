@@ -61,9 +61,29 @@ struct ActionDisplayRenderer {
         popupButton: NSPopUpButton
     ) {
         placeholderItem.title = title
-        placeholderItem.image = image
+        placeholderItem.image = image.map(Self.menuAlignedImage)
+        popupButton.imagePosition = .imageLeft
         popupButton.selectItem(at: 0)
         popupButton.synchronizeTitleAndSelectedItem()
+    }
+
+    private static func menuAlignedImage(_ image: NSImage) -> NSImage {
+        let targetHeight: CGFloat = 18
+        let imageSize = image.size
+        guard imageSize.height > 0, imageSize.height <= targetHeight else { return image }
+
+        let alignedSize = NSSize(width: imageSize.width, height: targetHeight)
+        let alignedImage = NSImage(size: alignedSize)
+        alignedImage.lockFocus()
+        image.draw(
+            in: NSRect(x: 0, y: (targetHeight - imageSize.height) / 2, width: imageSize.width, height: imageSize.height),
+            from: NSRect(origin: .zero, size: imageSize),
+            operation: .sourceOver,
+            fraction: 1.0
+        )
+        alignedImage.unlockFocus()
+        alignedImage.isTemplate = image.isTemplate
+        return alignedImage
     }
 
     private func createSymbolImage(named symbolName: String?) -> NSImage? {

@@ -52,6 +52,11 @@ enum ResolvedAction {
     }
 }
 
+struct OpenApplicationLaunchCommand: Equatable {
+    let executableURL: URL
+    let arguments: [String]
+}
+
 struct ActionExecutionResult {
     let mouseSessionID: UUID?
 
@@ -329,16 +334,16 @@ class ShortcutExecutor {
 
     private func launchApplication(_ payload: OpenTargetPayload) {
         let workspace = NSWorkspace.shared
-        let resolvedURL: URL? = {
+        let resolvedApplication: (url: URL, bundleID: String?)? = {
             if let bundleID = payload.bundleID,
                let url = workspace.urlForApplication(withBundleIdentifier: bundleID) {
-                return url
+                return (url, bundleID)
             }
             let url = URL(fileURLWithPath: payload.path)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            return FileManager.default.fileExists(atPath: url.path) ? (url, nil) : nil
         }()
 
-        guard let url = resolvedURL else {
+        guard let resolvedApplication else {
             let appName = (payload.path as NSString).lastPathComponent
             Toast.show(
                 String(format: NSLocalizedString("openTargetAppNotFound", comment: ""), appName),
@@ -348,40 +353,46 @@ class ShortcutExecutor {
             return
         }
 
-        let arguments = ArgumentSplitter.split(payload.arguments)
-        if #available(macOS 10.15, *) {
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.arguments = arguments
-            configuration.activates = true
-            workspace.openApplication(at: url, configuration: configuration) { _, error in
-                if let error = error {
-                    let appName = url.deletingPathExtension().lastPathComponent
-                    Toast.show(
-                        String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
-                        style: .error
-                    )
-                    NSLog("OpenTarget: launch failed: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            let configuration: [NSWorkspace.LaunchConfigurationKey: Any] = [
-                .arguments: arguments
-            ]
-            guard let launched = try? workspace.launchApplication(
-                at: url,
-                options: [.default, .async],
-                configuration: configuration
-            ) else {
-                let appName = url.deletingPathExtension().lastPathComponent
-                Toast.show(
-                    String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
-                    style: .error
-                )
-                NSLog("OpenTarget: legacy launch failed for path=\(url.path)")
-                return
-            }
-            launched.activate(options: [.activateIgnoringOtherApps])
+        let commandPayload = OpenTargetPayload(
+            path: payload.path,
+            bundleID: resolvedApplication.bundleID,
+            arguments: payload.arguments,
+            isApplication: payload.isApplication
+        )
+        let command = Self.openApplicationCommand(for: commandPayload, resolvedURL: resolvedApplication.url)
+        let process = Process()
+        process.executableURL = command.executableURL
+        process.arguments = command.arguments
+        do {
+            try process.run()
+        } catch {
+            let appName = resolvedApplication.url.deletingPathExtension().lastPathComponent
+            Toast.show(
+                String(format: NSLocalizedString("openTargetAppLaunchFailed", comment: ""), appName),
+                style: .error
+            )
+            NSLog("OpenTarget: launch failed via /usr/bin/open: \(error.localizedDescription)")
         }
+    }
+
+    static func openApplicationCommand(for payload: OpenTargetPayload, resolvedURL: URL) -> OpenApplicationLaunchCommand {
+        var arguments: [String]
+        if let bundleID = payload.bundleID, !bundleID.isEmpty {
+            arguments = ["-b", bundleID]
+        } else {
+            arguments = [resolvedURL.path]
+        }
+
+        let appArguments = ArgumentSplitter.split(payload.arguments)
+        if !appArguments.isEmpty {
+            arguments.append("--args")
+            arguments.append(contentsOf: appArguments)
+        }
+
+        return OpenApplicationLaunchCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/open"),
+            arguments: arguments
+        )
     }
 
     private func runScript(_ payload: OpenTargetPayload) {

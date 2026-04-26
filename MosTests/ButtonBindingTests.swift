@@ -437,6 +437,19 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertTrue(openSelectionInvoked, "Selecting the __open__ menu item should trigger onOpenTargetSelectionRequested")
     }
 
+    func testShortcutSelected_openSentinelRestoresCurrentActionDisplay() {
+        let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
+        let binding = ButtonBinding(triggerEvent: trigger, systemShortcutName: "copy")
+        let cell = makeButtonCell(binding: binding)
+        cell.actionPopUpButton.menu?.items.first?.title = NSLocalizedString("open-target-action", comment: "")
+
+        let openItem = NSMenuItem(title: "Open Application…", action: nil, keyEquivalent: "")
+        openItem.representedObject = "__open__" as NSString
+        cell.shortcutSelected(openItem)
+
+        XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, SystemShortcut.copy.localizedName)
+    }
+
     func testBuildShortcutMenu_includesEscapeInFunctionKeysCategory() {
         let menu = NSMenu()
         let target = ShortcutMenuTestTarget()

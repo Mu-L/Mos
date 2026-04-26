@@ -435,6 +435,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
 
     func beginCustomShortcutSelection(startRecorder: Bool = true) {
         isCustomRecordingActive = true
+        refreshActionDisplay()
         DispatchQueue.main.async { [weak self] in
             self?.refreshActionDisplay()
         }
@@ -459,6 +460,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     @objc internal func shortcutSelected(_ sender: NSMenuItem) {
         // "打开应用…" sentinel: 把后续配置流程交给外部
         if sender.representedObject as? String == "__open__" {
+            restoreTransientSelectorDisplay()
             onOpenTargetSelectionRequested?()
             return
         }
@@ -489,6 +491,13 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         // 延迟重绘虚线和冲突指示器 (等待 PopUpButton 布局更新)
         DispatchQueue.main.async {
             self.refreshConflictIndicator()
+        }
+    }
+
+    private func restoreTransientSelectorDisplay() {
+        refreshActionDisplay()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshActionDisplay()
         }
     }
 

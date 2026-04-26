@@ -76,4 +76,36 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
         XCTAssertEqual(ResolvedAction.mouseButton(kind: .left).executionMode, .stateful)
         XCTAssertEqual(ResolvedAction.logiAction(identifier: "logiSmartShiftToggle").executionMode, .trigger)
     }
+
+    func testOpenApplicationCommand_emptyArgumentsUsesSystemOpenWithoutArgsSentinel() {
+        let payload = OpenTargetPayload(
+            path: "/System/Applications/FindMy.app",
+            bundleID: "com.apple.findmy",
+            arguments: "",
+            isApplication: true
+        )
+        let url = URL(fileURLWithPath: "/System/Applications/FindMy.app")
+
+        let command = ShortcutExecutor.openApplicationCommand(for: payload, resolvedURL: url)
+
+        XCTAssertEqual(command.executableURL.path, "/usr/bin/open")
+        XCTAssertEqual(command.arguments, ["-b", "com.apple.findmy"])
+    }
+
+    func testOpenApplicationCommand_argumentsAppendAfterArgsSentinel() {
+        let payload = OpenTargetPayload(
+            path: "/Applications/Safari.app",
+            bundleID: "com.apple.Safari",
+            arguments: "https://example.com \"with space\"",
+            isApplication: true
+        )
+        let url = URL(fileURLWithPath: "/Applications/Safari.app")
+
+        let command = ShortcutExecutor.openApplicationCommand(for: payload, resolvedURL: url)
+
+        XCTAssertEqual(
+            command.arguments,
+            ["-b", "com.apple.Safari", "--args", "https://example.com", "with space"]
+        )
+    }
 }
