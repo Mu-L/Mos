@@ -425,8 +425,24 @@ final class FileSlotView: NSView {
         filledView = makeFilledView()
         emptyView.alphaValue = 1
         filledView.alphaValue = 0
+        // 用 auto-layout edge anchor 钉死到父视图四边. 默认 translatesAutoresizingMask
+        // = true 会从初始 frame=.zero 派生 width=0/height=0 隐式约束, 与内部 icon
+        // 的 required 约束 (leading=12, width=36) 冲突, 在 console 里刷一堆
+        // "Conflicting constraints" 警告.
+        emptyView.translatesAutoresizingMaskIntoConstraints = false
+        filledView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(emptyView)
         addSubview(filledView)
+        NSLayoutConstraint.activate([
+            emptyView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            emptyView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            emptyView.topAnchor.constraint(equalTo: topAnchor),
+            emptyView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            filledView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            filledView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            filledView.topAnchor.constraint(equalTo: topAnchor),
+            filledView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
 
         applyEmptyAppearance()
     }
@@ -486,8 +502,8 @@ final class FileSlotView: NSView {
         // 其它 layer 重建场景下会把 anchorPoint 重置回 (0,0); 不在此处补偿, 接下来的
         // scale 动画就会从角落起算. ensureCenterAnchor 是幂等的.
         ensureCenterAnchor()
-        emptyView.frame = bounds
-        filledView.frame = bounds
+        // emptyView / filledView 的 frame 由 setupView 里的 edge anchor 约束驱动,
+        // 不再手动设置 (会与 auto-layout 打架).
         borderLayer.frame = bounds
         borderLayer.path = CGPath(
             roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75),
