@@ -417,16 +417,30 @@ class ShortcutExecutor {
         }
     }
 
-    /// 剥掉会污染目标进程的 env vars (调试器注入 / 内存分析器 / sanitizer 等).
+    /// 在 Mos 自身进程启动后, 立刻 unsetenv 掉污染 keys.
     ///
-    /// 关键背景: Process() 默认继承父进程完整环境. 当 Mos Debug 由 Xcode 启动时,
-    /// Xcode 注入 DYLD_INSERT_LIBRARIES=.../libViewDebuggerSupport.dylib 等 vars,
-    /// 这些一路传到 /usr/bin/open 再到 LaunchServices 启动的目标 App; 依赖 AVKit 的
-    /// sealed system app (FindMy/Maps/Podcasts) 加载 libViewDebuggerSupport 时找不到
-    /// _OBJC_CLASS_$_AVPlayerView, dyld halt → SIGABRT.
+    /// 必须这么做的原因: 当 Mos Debug 由 Xcode 启动时, env 里带 DYLD_INSERT_LIBRARIES=
+    /// .../libViewDebuggerSupport.dylib, 还有 __XPC_DYLD_* 等. 这些 keys 即使通过
+    /// NSWorkspace.openApplication (XPC 到 launchservicesd) 启动子 App, 仍会被 macOS
+    /// 沿着 XPC 链路传递到 launchservicesd 再到目标 App, 导致依赖 AVKit 的 sealed
+    /// system app 加载 libViewDebuggerSupport 时找不到符号, dyld halt → SIGABRT.
     ///
-    /// 这是子进程 env 污染问题, 不是 Mos 本体的 bug; Release 版本 Mos 不会注入这些 vars,
-    /// 但开发时 Xcode 调试 + 也要用 OpenTarget 的话, 必须主动剥离.
+    /// `Process.environment = sanitizedSubprocessEnvironment()` 只能堵 Process 这一条
+    /// 路径; XPC 走的是 libxpc 内部读 live env, 必须从源头 unsetenv 才能根治.
+    ///
+    /// 调用时机: AppDelegate.applicationWillFinishLaunching 最早调一次. dyld 已经在
+    /// app 启动时读完 DYLD_*, 之后 unsetenv 不会卸载已加载的 dylib (Xcode 视图调试
+    /// 在 Mos 自身进程里继续工作), 但任何之后启动的子进程都拿不到这些 vars 了.
+    ///
+    /// Release 版本环境里这些 keys 本来就不存在, unsetenv 是 no-op. 安全无副作用.
+    static func sanitizeOwnLaunchEnvironment() {
+        for key in ProcessInfo.processInfo.environment.keys where shouldStripEnvKey(key) {
+            unsetenv(key)
+        }
+    }
+
+    /// 已 unsetenv 后再读, 返回当前 env 的副本 (供 Process.environment 显式赋值用).
+    /// 双重保险: sanitizeOwnLaunchEnvironment 已经清干净源头, 这里再过滤一遍兜底.
     static func sanitizedSubprocessEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         for key in env.keys where shouldStripEnvKey(key) {
@@ -436,11 +450,13 @@ class ShortcutExecutor {
     }
 
     private static func shouldStripEnvKey(_ key: String) -> Bool {
-        // dyld 注入路径 / fallback 路径 / 框架路径
+        // dyld 注入 / fallback 路径 / 框架路径
         if key.hasPrefix("DYLD_") { return true }
-        // Xcode 通过 launchd XPC 传递的 dyld 注入
+        // Xcode 通过 launchd XPC 传递的 dyld 注入 (会跨 XPC 边界变成子进程的 DYLD_*)
         if key.hasPrefix("__XPC_DYLD_") { return true }
-        // 其它常见 Xcode/调试器 env 标记
+        // Xcode 调试器附加 (LLVM profile / SwiftUI 视图调试 等)
+        if key.hasPrefix("__XPC_LLVM_") { return true }
+        if key == "SWIFTUI_VIEW_DEBUG" { return true }
         if key.hasPrefix("OS_ACTIVITY_DT_") { return true }
         // 内存分析器
         if key.hasPrefix("MallocStack") { return true }

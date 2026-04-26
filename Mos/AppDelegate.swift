@@ -17,6 +17,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // 运行前预处理
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // 必须最早调用: 从 Mos 自身 env 移除 DYLD_INSERT_LIBRARIES / __XPC_DYLD_* 等
+        // Xcode 调试器注入的 vars. 这些 vars 会沿 XPC 链路传到 launchservicesd 再传到
+        // 任何 Mos 启动的子 App, 导致依赖 AVKit 的 system app (Maps/FindMy/Podcasts)
+        // 加载 libViewDebuggerSupport 时找不到符号 → dyld halt. Mos 自身进程已加载完
+        // 依赖, unsetenv 不影响自身, 只让之后启动的子进程拿到干净 env.
+        ShortcutExecutor.sanitizeOwnLaunchEnvironment()
+
         // 禁止重复运行, 结束正在运行的实例
         Utils.preventMultiRunning(killExist: true)
         
