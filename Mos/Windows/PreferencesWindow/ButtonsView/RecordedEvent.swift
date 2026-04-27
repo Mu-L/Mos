@@ -302,6 +302,39 @@ struct ButtonBinding: Codable, Equatable {
         self.createdAt = createdAt
     }
 
+    // MARK: - Decode-time 一致性校验 (UI 与 executor 必须看到同一个真相)
+    //
+    // 不变量: systemShortcutName == openTargetSentinel ⇔ openTarget != nil
+    //
+    // 没有这层校验时, 手改 / AI 改写的 JSON 可能写出 mismatch 状态:
+    //   - {"systemShortcutName":"copy", "openTarget":{...}}  → UI 显 "打开 Safari", 执行却跑 Copy
+    //   - {"systemShortcutName":"openTarget", openTarget 缺}  → UI 显 unbound, 执行 no-op
+    // decode 时 throw, 让 Options.decodeButtonBindingsWithUnknowns 把这条 binding 收到
+    // preservedUnknownBindings, save 时再 round-trip 回去 (用户改 JSON 改坏了一条不会被静默吞掉).
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.triggerEvent = try c.decode(RecordedEvent.self, forKey: .triggerEvent)
+        let name = try c.decode(String.self, forKey: .systemShortcutName)
+        self.systemShortcutName = name
+        self.isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+        let payload = try c.decodeIfPresent(OpenTargetPayload.self, forKey: .openTarget)
+        self.openTarget = payload
+
+        // 强制一致性: sentinel 与 payload 同时存在或同时不存在.
+        let nameIsSentinel = (name == Self.openTargetSentinel)
+        let payloadIsPresent = (payload != nil)
+        if nameIsSentinel != payloadIsPresent {
+            throw DecodingError.dataCorruptedError(
+                forKey: .openTarget,
+                in: c,
+                debugDescription: "Inconsistent OpenTarget binding: systemShortcutName=\"\(name)\" but openTarget \(payloadIsPresent ? "present" : "missing")"
+            )
+        }
+    }
+
     // MARK: - 自定义缓存
 
     /// 解析 custom:: 格式并填充缓存字段

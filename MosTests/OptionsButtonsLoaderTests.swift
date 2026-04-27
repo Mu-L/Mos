@@ -102,4 +102,38 @@ final class OptionsButtonsLoaderTests: XCTestCase {
         XCTAssertTrue(result.bindings.isEmpty)
         XCTAssertTrue(result.unknownElements.isEmpty)
     }
+
+    /// Round-trip 验证: decode 之后再 encode + decode, unknown 元素必须保持完整 + 顺序在末尾.
+    /// 这是 fix 3 的核心承诺 (用户升级到未来版本写入新 binding, 然后降级到当前版本,
+    /// 当前版本不删除/不损坏新数据), 必须有直接覆盖.
+    func testDecodeWithUnknowns_roundTripPreservesUnknowns() {
+        let knownValid = makeBindingJSON(id: "11111111-1111-1111-1111-111111111111", systemShortcutName: "copy")
+        let futureUnknown = """
+        {"id":"99999999-9999-9999-9999-999999999999",
+         "triggerEvent":{"type":"mouse","code":7,"modifiers":0,"displayComponents":["🖱8"],"deviceFilter":null},
+         "systemShortcutName":"runShellCommand",
+         "isEnabled":true,
+         "createdAt":"2030-01-01T00:00:00Z",
+         "shellPayload":{"command":"echo hi"}}
+        """
+        let originalJSON = "[\(knownValid),\(futureUnknown)]"
+        let originalData = originalJSON.data(using: .utf8)!
+
+        // 解 + 收 unknown
+        let result1 = Options.decodeButtonBindingsWithUnknowns(from: originalData)
+        XCTAssertEqual(result1.bindings.count, 1)
+        XCTAssertEqual(result1.unknownElements.count, 1)
+
+        // 重新拼回 (模拟 saveButtonBindingsData 的合并逻辑)
+        let knownData = try! JSONEncoder().encode(result1.bindings)
+        var merged = try! JSONSerialization.jsonObject(with: knownData) as! [Any]
+        merged.append(contentsOf: result1.unknownElements)
+        let mergedData = try! JSONSerialization.data(withJSONObject: merged)
+
+        // 再解一次, unknown 还在
+        let result2 = Options.decodeButtonBindingsWithUnknowns(from: mergedData)
+        XCTAssertEqual(result2.bindings.count, 1)
+        XCTAssertEqual(result2.bindings.first?.systemShortcutName, "copy")
+        XCTAssertEqual(result2.unknownElements.count, 1, "未来版本 binding 必须 round-trip 保持")
+    }
 }

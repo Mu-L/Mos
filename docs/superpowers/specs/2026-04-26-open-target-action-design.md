@@ -276,14 +276,19 @@ case .openTarget(let payload):
     return .none
 ```
 
-Add three new private methods, parallel in style to `executeMouseButton` / `executeLogiAction`:
+Add three new private methods, parallel in style to `executeMouseButton` / `executeLogiAction`. Note that the actual open work runs on a dedicated `userInitiated` background queue — the dispatch chain that arrives here originates from a CGEvent tap callback, which has a strict latency budget (default ~1 s); any synchronous `NSWorkspace.openApplication` / `Process.run()` / `FileManager` call risks getting the tap auto-disabled by the system.
 
 ```swift
+// Serial userInitiated queue; calls below all hop here before doing real work.
+private static let openTargetQueue = DispatchQueue(label: "com.caldis.Mos.openTarget", qos: .userInitiated)
+
 private func executeOpenTarget(_ payload: OpenTargetPayload) {
-    switch payload.kind {
-    case .application: launchApplication(payload)
-    case .script:      runScript(payload)
-    case .file:        openFile(payload)
+    Self.openTargetQueue.async { [payload] in
+        switch payload.kind {
+        case .application: self.launchApplication(payload)
+        case .script:      self.runScript(payload)
+        case .file:        self.openFile(payload)
+        }
     }
 }
 
@@ -801,7 +806,7 @@ Total: ~30 lines of external touch + ~360 lines of new feature code. All changes
 |---|---|---|
 | New Mos reads old binding (no `openTarget` field) | Old `systemShortcutName` path unchanged | Optional Codable field |
 | Old Mos reads new binding (has `openTarget`) | Unknown sentinel → `resolveAction` returns nil → silent no-op; binding preserved | `getShortcut(named:)` returns nil for unknown ID |
-| Current Mos reads future binding (unknown payload) | That binding skipped + logged; other bindings preserved | Per-binding tolerant decode |
+| Current Mos reads future binding (unknown payload) | The binding's raw JSON is preserved in `Options.preservedUnknownBindings`; on next save it's merged back into the array, so a downgrade-then-upgrade cycle doesn't lose data | Per-binding tolerant decode + unknown round-trip |
 | Future ButtonBinding adds new payload type | Add new payload file in `Shortcut/`, add `ResolvedAction` case, add executor method, add UI dispatch | Same extension shape as existing 4 action types |
 
 ## Verification Plan

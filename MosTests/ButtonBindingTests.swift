@@ -693,4 +693,97 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
     }
+
+    // MARK: - Sentinel/payload consistency (decode 拒绝 mismatch)
+
+    func testCodable_sentinelWithoutPayload_throws() {
+        // {"systemShortcutName":"openTarget", 缺 openTarget} → 不一致, 应该 throw
+        let json = """
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "triggerEvent": {"type":"mouse","code":3,"modifiers":0,"displayComponents":["🖱4"],"deviceFilter":null},
+            "systemShortcutName": "openTarget",
+            "isEnabled": true,
+            "createdAt": "2025-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertThrowsError(try decoder.decode(ButtonBinding.self, from: json)) { error in
+            guard case DecodingError.dataCorrupted = error else {
+                XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testCodable_payloadWithNonSentinelName_throws() {
+        // {"systemShortcutName":"copy", "openTarget":{...}} → 不一致, 应该 throw
+        let json = """
+        {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "triggerEvent": {"type":"mouse","code":3,"modifiers":0,"displayComponents":["🖱4"],"deviceFilter":null},
+            "systemShortcutName": "copy",
+            "isEnabled": true,
+            "createdAt": "2025-01-01T00:00:00Z",
+            "openTarget": {
+                "path": "/Applications/Safari.app",
+                "bundleID": "com.apple.Safari",
+                "arguments": "",
+                "kind": "application"
+            }
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertThrowsError(try decoder.decode(ButtonBinding.self, from: json)) { error in
+            guard case DecodingError.dataCorrupted = error else {
+                XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testCodable_sentinelWithPayload_decodesOK() {
+        // 一致状态: 应正常 decode
+        let json = """
+        {
+            "id": "33333333-3333-3333-3333-333333333333",
+            "triggerEvent": {"type":"mouse","code":3,"modifiers":0,"displayComponents":["🖱4"],"deviceFilter":null},
+            "systemShortcutName": "openTarget",
+            "isEnabled": true,
+            "createdAt": "2025-01-01T00:00:00Z",
+            "openTarget": {
+                "path": "/Applications/Safari.app",
+                "bundleID": "com.apple.Safari",
+                "arguments": "https://example.com",
+                "kind": "application"
+            }
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let binding = try! decoder.decode(ButtonBinding.self, from: json)
+        XCTAssertEqual(binding.systemShortcutName, "openTarget")
+        XCTAssertNotNil(binding.openTarget)
+        XCTAssertEqual(binding.openTarget?.kind, .application)
+    }
+
+    func testCodable_nonSentinelWithoutPayload_decodesOK() {
+        // 一致状态: 普通 system shortcut, 无 openTarget. 应正常 decode.
+        let json = """
+        {
+            "id": "44444444-4444-4444-4444-444444444444",
+            "triggerEvent": {"type":"mouse","code":3,"modifiers":0,"displayComponents":["🖱4"],"deviceFilter":null},
+            "systemShortcutName": "copy",
+            "isEnabled": true,
+            "createdAt": "2025-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let binding = try! decoder.decode(ButtonBinding.self, from: json)
+        XCTAssertEqual(binding.systemShortcutName, "copy")
+        XCTAssertNil(binding.openTarget)
+    }
 }
