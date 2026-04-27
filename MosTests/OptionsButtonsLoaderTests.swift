@@ -78,4 +78,28 @@ final class OptionsButtonsLoaderTests: XCTestCase {
         XCTAssertEqual(bindings.count, 2)
         XCTAssertEqual(bindings.map { $0.systemShortcutName }.sorted(), ["copy", "paste"])
     }
+
+    // MARK: - Unknown preservation
+
+    func testDecodeWithUnknowns_preservesFutureFormatBindings() {
+        // 模拟未来版本写入了一种当前 Mos 不认识的 binding (e.g. systemShortcutName 是
+        // 某个新的 sentinel, 字段集与当前不兼容). 当前 Mos 应当保留原 JSON 在 unknownElements
+        // 里, 不丢失.
+        let valid = makeBindingJSON()
+        let futureFormat = """
+        {"id": "44444444-4444-4444-4444-444444444444",
+         "futurePayload": {"type": "runShellCommand", "command": "echo hi"},
+         "isEnabled": true}
+        """
+        let data = "[\(valid),\(futureFormat)]".data(using: .utf8)!
+        let result = Options.decodeButtonBindingsWithUnknowns(from: data)
+        XCTAssertEqual(result.bindings.count, 1)
+        XCTAssertEqual(result.unknownElements.count, 1)
+    }
+
+    func testDecodeWithUnknowns_emptyArray_returnsBothEmpty() {
+        let result = Options.decodeButtonBindingsWithUnknowns(from: "[]".data(using: .utf8)!)
+        XCTAssertTrue(result.bindings.isEmpty)
+        XCTAssertTrue(result.unknownElements.isEmpty)
+    }
 }

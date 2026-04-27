@@ -320,11 +320,25 @@ class ShortcutExecutor {
 
     // MARK: - Open Target Actions
 
+    /// 专用串行后台队列, 用于把 OpenTarget 实际执行 (NSWorkspace/Process/FileManager)
+    /// 调离 CGEvent tap 回调链.
+    private static let openTargetQueue = DispatchQueue(
+        label: "com.caldis.Mos.openTarget",
+        qos: .userInitiated
+    )
+
     private func executeOpenTarget(_ payload: OpenTargetPayload) {
-        switch payload.kind {
-        case .application: launchApplication(payload)
-        case .script:      runScript(payload)
-        case .file:        openFile(payload)
+        // CRITICAL: dispatch to background queue.
+        // 调用栈: ButtonCore CGEvent tap → InputProcessor → ShortcutExecutor.execute(action:phase:).
+        // CGEvent tap 有严格的回调延迟约束 (默认 1s 超时), 超时后系统会自动禁用 tap, 整个
+        // 鼠标事件流断掉. NSWorkspace.openApplication / Process.run() / FileManager 都可能
+        // 卡在 LaunchServices RPC、网络盘 stat、fork+exec、文件系统查询上, 同步执行有真实风险.
+        Self.openTargetQueue.async { [payload] in
+            switch payload.kind {
+            case .application: self.launchApplication(payload)
+            case .script:      self.runScript(payload)
+            case .file:        self.openFile(payload)
+            }
         }
     }
 
@@ -442,11 +456,16 @@ class ShortcutExecutor {
     /// 已 unsetenv 后再读, 返回当前 env 的副本 (供 Process.environment 显式赋值用).
     /// 双重保险: sanitizeOwnLaunchEnvironment 已经清干净源头, 这里再过滤一遍兜底.
     static func sanitizedSubprocessEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
+        return filterEnvironment(ProcessInfo.processInfo.environment)
+    }
+
+    /// 纯函数: 输入一个 env dict, 输出剥离了污染 keys 的副本. 暴露出来供单测用控制输入验证.
+    static func filterEnvironment(_ env: [String: String]) -> [String: String] {
+        var out = env
         for key in env.keys where shouldStripEnvKey(key) {
-            env.removeValue(forKey: key)
+            out.removeValue(forKey: key)
         }
-        return env
+        return out
     }
 
     private static func shouldStripEnvKey(_ key: String) -> Bool {

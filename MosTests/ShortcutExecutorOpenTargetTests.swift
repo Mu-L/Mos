@@ -79,30 +79,61 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
 
     // MARK: - Subprocess env sanitization
 
-    func testSanitizedSubprocessEnvironment_stripsDyldInjection() {
-        // 在 ProcessInfo.environment 注入污染 vars 不可行 (read-only),
-        // 但我们可以通过白盒测试 shouldStripEnvKey 间接验证. 这里用 helper
-        // ShortcutExecutor.sanitizedSubprocessEnvironment() 把当前 env 过一遍,
-        // 断言常见污染 keys 一定不在结果里 (无论它们当前是否存在).
-        let env = ShortcutExecutor.sanitizedSubprocessEnvironment()
-        for key in env.keys {
-            XCTAssertFalse(key.hasPrefix("DYLD_"), "DYLD_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("__XPC_DYLD_"), "__XPC_DYLD_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("OS_ACTIVITY_DT_"), "OS_ACTIVITY_DT_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("MallocStack"), "MallocStack* 应该被剥离, 但留了 \(key)")
-            XCTAssertNotEqual(key, "NSZombieEnabled")
-            XCTAssertNotEqual(key, "NSDeallocateZombies")
-            XCTAssertFalse(key.hasPrefix("ASAN_"), "ASAN_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("TSAN_"), "TSAN_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("LSAN_"), "LSAN_* 应该被剥离, 但留了 \(key)")
-            XCTAssertFalse(key.hasPrefix("UBSAN_"), "UBSAN_* 应该被剥离, 但留了 \(key)")
-        }
+    func testFilterEnvironment_stripsAllPollutionKeys() {
+        // 用控制输入直接验证 filter 对每一类污染前缀都识别. 之前的测试只验证当前
+        // 真实 env (CI 环境干净时跑不出有效信号), 不能算证明 strip-list 工作.
+        let polluted: [String: String] = [
+            "DYLD_INSERT_LIBRARIES": "/Xcode/.../libViewDebuggerSupport.dylib",
+            "DYLD_FRAMEWORK_PATH": "/some/path",
+            "DYLD_LIBRARY_PATH": "/some/path",
+            "__XPC_DYLD_LIBRARY_PATH": "/some/path",
+            "__XPC_DYLD_FRAMEWORK_PATH": "/some/path",
+            "__XPC_LLVM_PROFILE_FILE": "/dev/null",
+            "OS_ACTIVITY_DT_MODE": "YES",
+            "MallocStackLogging": "1",
+            "MallocStackLoggingNoCompact": "1",
+            "NSZombieEnabled": "YES",
+            "NSDeallocateZombies": "NO",
+            "SWIFTUI_VIEW_DEBUG": "287",
+            "ASAN_OPTIONS": "detect_leaks=1",
+            "TSAN_OPTIONS": "halt_on_error=1",
+            "LSAN_OPTIONS": "x",
+            "UBSAN_OPTIONS": "x",
+            // 常规 env: 必须保留
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/test",
+            "USER": "test",
+            "LANG": "en_US.UTF-8",
+        ]
+
+        let filtered = ShortcutExecutor.filterEnvironment(polluted)
+
+        // 污染 keys 必须全部消失
+        XCTAssertNil(filtered["DYLD_INSERT_LIBRARIES"])
+        XCTAssertNil(filtered["DYLD_FRAMEWORK_PATH"])
+        XCTAssertNil(filtered["DYLD_LIBRARY_PATH"])
+        XCTAssertNil(filtered["__XPC_DYLD_LIBRARY_PATH"])
+        XCTAssertNil(filtered["__XPC_DYLD_FRAMEWORK_PATH"])
+        XCTAssertNil(filtered["__XPC_LLVM_PROFILE_FILE"])
+        XCTAssertNil(filtered["OS_ACTIVITY_DT_MODE"])
+        XCTAssertNil(filtered["MallocStackLogging"])
+        XCTAssertNil(filtered["MallocStackLoggingNoCompact"])
+        XCTAssertNil(filtered["NSZombieEnabled"])
+        XCTAssertNil(filtered["NSDeallocateZombies"])
+        XCTAssertNil(filtered["SWIFTUI_VIEW_DEBUG"])
+        XCTAssertNil(filtered["ASAN_OPTIONS"])
+        XCTAssertNil(filtered["TSAN_OPTIONS"])
+        XCTAssertNil(filtered["LSAN_OPTIONS"])
+        XCTAssertNil(filtered["UBSAN_OPTIONS"])
+
+        // 常规 keys 必须保留
+        XCTAssertEqual(filtered["PATH"], "/usr/bin:/bin")
+        XCTAssertEqual(filtered["HOME"], "/Users/test")
+        XCTAssertEqual(filtered["USER"], "test")
+        XCTAssertEqual(filtered["LANG"], "en_US.UTF-8")
     }
 
-    func testSanitizedSubprocessEnvironment_preservesNormalEnv() {
-        // 常规 env (PATH/HOME/USER 等) 必须保留, 否则脚本会跑不起来.
-        let env = ShortcutExecutor.sanitizedSubprocessEnvironment()
-        // 这些是 macOS shell 进程必有的, 只要脚本跑得起来就该有.
-        XCTAssertNotNil(env["PATH"] ?? env["HOME"], "至少一个常规 env 应被保留")
+    func testFilterEnvironment_emptyInput_returnsEmpty() {
+        XCTAssertEqual(ShortcutExecutor.filterEnvironment([:]).count, 0)
     }
 }

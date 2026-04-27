@@ -63,14 +63,53 @@ final class OpenTargetPayloadTests: XCTestCase {
         XCTAssertEqual(decoded.kind, .script)
     }
 
+    // MARK: - Invariant normalization
+
+    func testInit_filekind_clearsBundleIDAndArguments() {
+        // 防 hand-edited / AI rewrite 写出 .file 还带 bundleID 或 arguments 的非法组合.
+        let payload = OpenTargetPayload(
+            path: "/Users/x/photo.png",
+            bundleID: "com.fake.app",          // ← 非法: file 不该有 bundleID
+            arguments: "--should-be-stripped", // ← 非法: file 不接受 args
+            kind: .file
+        )
+        XCTAssertNil(payload.bundleID)
+        XCTAssertEqual(payload.arguments, "")
+    }
+
+    func testInit_scriptKind_clearsBundleID() {
+        // 防 .script 带 bundleID.
+        let payload = OpenTargetPayload(
+            path: "/run.sh",
+            bundleID: "com.fake.app",  // ← 非法
+            arguments: "--port 3000",
+            kind: .script
+        )
+        XCTAssertNil(payload.bundleID)
+        XCTAssertEqual(payload.arguments, "--port 3000")  // .script 保留 args
+    }
+
+    func testCodable_filekindWithArgsInJSON_isClearedOnDecode() {
+        // 模拟用户/AI 直接编辑 JSON, 写了 kind=.file 但带 args.
+        let nonconformingJSON = """
+        {"path":"/x.png","bundleID":"com.foo","arguments":"--bad","kind":"file"}
+        """.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(OpenTargetPayload.self, from: nonconformingJSON)
+        XCTAssertEqual(decoded.kind, .file)
+        XCTAssertNil(decoded.bundleID)
+        XCTAssertEqual(decoded.arguments, "")
+    }
+
     func testEquatable() {
+        // 注: kind=.file 时 init 会强制 arguments="", 所以下面用 .script 制造 arguments 差异.
         let a = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .file)
         let b = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .file)
-        let c = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "x", kind: .file)
+        let c = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "x", kind: .script)
         let d = OpenTargetPayload(path: "/a", bundleID: nil, arguments: "", kind: .script)
         XCTAssertEqual(a, b)
-        XCTAssertNotEqual(a, c)
-        XCTAssertNotEqual(a, d)
+        XCTAssertNotEqual(a, c)   // 不同 kind
+        XCTAssertNotEqual(a, d)   // 不同 kind
+        XCTAssertNotEqual(c, d)   // 同 kind, 不同 args
     }
 
     func testJSONShape_isFlatAndReadable() {

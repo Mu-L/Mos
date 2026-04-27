@@ -39,8 +39,10 @@ struct OpenTargetPayload: Equatable {
 
     init(path: String, bundleID: String?, arguments: String, kind: OpenTargetKind) {
         self.path = path
-        self.bundleID = bundleID
-        self.arguments = arguments
+        // Normalize 不变量: 只有 .application 才允许有 bundleID, 只有 .application/.script 才使用 arguments.
+        // 防 hand-edited / AI rewrite 的非法组合 (e.g. .file 带 args, .script 带 bundleID) 漏到执行层.
+        self.bundleID = (kind == .application) ? bundleID : nil
+        self.arguments = (kind == .file) ? "" : arguments
         self.kind = kind
     }
 }
@@ -59,19 +61,22 @@ extension OpenTargetPayload: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        path = try c.decode(String.self, forKey: .path)
-        bundleID = try c.decodeIfPresent(String.self, forKey: .bundleID)
-        arguments = try c.decode(String.self, forKey: .arguments)
+        let rawPath = try c.decode(String.self, forKey: .path)
+        let rawBundleID = try c.decodeIfPresent(String.self, forKey: .bundleID)
+        let rawArguments = try c.decode(String.self, forKey: .arguments)
+        let resolvedKind: OpenTargetKind
         if let k = try c.decodeIfPresent(OpenTargetKind.self, forKey: .kind) {
-            kind = k
+            resolvedKind = k
         } else if let isApp = try c.decodeIfPresent(Bool.self, forKey: .isApplication) {
-            kind = isApp ? .application : .script
+            resolvedKind = isApp ? .application : .script
         } else {
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: c,
                 debugDescription: "OpenTargetPayload requires either 'kind' or legacy 'isApplication'"
             )
         }
+        // 走主 init 让不变量 normalize 一次 (.file 强制清空 args/bundleID, .script 强制清空 bundleID).
+        self.init(path: rawPath, bundleID: rawBundleID, arguments: rawArguments, kind: resolvedKind)
     }
 
     func encode(to encoder: Encoder) throws {
