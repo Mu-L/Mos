@@ -115,7 +115,7 @@ class ShortcutManager {
             menu.addItem(categoryMenuItem)
         }
 
-        // 鼠标按键分类 (始终显示)
+        // 修饰键分类 (始终显示)
         addCategoryToMenu(
             menu: menu,
             category: SystemShortcut.modifierKeysCategory,
@@ -131,6 +131,16 @@ class ShortcutManager {
             target: target,
             action: action,
             totalShortcuts: &totalShortcuts
+        )
+
+        // Mos 鼠标滚动分类 (始终显示, 使用 Mos tag 样式)
+        addCategoryToMenu(
+            menu: menu,
+            category: SystemShortcut.mosMouseScrollCategory,
+            target: target,
+            action: action,
+            totalShortcuts: &totalShortcuts,
+            customImage: BrandTag.createTagImage(brand: .mos, fontSize: 7, height: 14)
         )
 
         // Logi 专有动作分类 (仅当触发键为 Logi 按键时显示, 使用 Logitech 品牌 tag 样式)

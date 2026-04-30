@@ -11,6 +11,36 @@ import Cocoa
 import IOKit
 import IOKit.hid
 
+struct LogiButtonStateDelta: Equatable {
+    let pressed: Set<UInt16>
+    let released: Set<UInt16>
+}
+
+struct LogiButtonStateTracker {
+    private(set) var activeCIDs: Set<UInt16> = []
+
+    mutating func update(activeCIDs newActiveCIDs: Set<UInt16>) -> LogiButtonStateDelta {
+        let delta = LogiButtonStateDelta(
+            pressed: newActiveCIDs.subtracting(activeCIDs),
+            released: activeCIDs.subtracting(newActiveCIDs)
+        )
+        activeCIDs = newActiveCIDs
+        return delta
+    }
+
+    mutating func releaseActiveCIDs(in cids: Set<UInt16>) -> Set<UInt16> {
+        let released = activeCIDs.intersection(cids)
+        activeCIDs.subtract(released)
+        return released
+    }
+
+    mutating func releaseAll() -> Set<UInt16> {
+        let released = activeCIDs
+        activeCIDs.removeAll()
+        return released
+    }
+}
+
 class LogiDeviceSession {
 
     // MARK: - Public
@@ -37,7 +67,7 @@ class LogiDeviceSession {
     // MARK: - HID++ State
     private var featureIndex: [UInt16: UInt8] = [:]
     private var divertedCIDs: Set<UInt16> = []
-    private var lastActiveCIDs: Set<UInt16> = []
+    private var buttonStateTracker = LogiButtonStateTracker()
     private var deviceIndex: UInt8 = 0x01
     private var isBLE: Bool = false
     private var deviceOpened: Bool = false
@@ -219,6 +249,7 @@ class LogiDeviceSession {
         }
         let toDivert = targetCIDs.subtracting(self.lastApplied)
         let toUndivert = self.lastApplied.subtracting(targetCIDs)
+        releaseActiveButtonState(for: toUndivert, reason: "usage removed")
         for cid in toDivert {
             setControlReporting(featureIndex: reprogIdx, cid: cid, divert: true)
         }
@@ -334,13 +365,13 @@ class LogiDeviceSession {
         reportingQueryTimer?.invalidate()
         reportingQueryTimer = nil
         pendingDiscovery.removeAll()
+        releaseAllActiveButtonState(reason: "teardown")
         if let reprogIdx = featureIndex[Self.featureReprogV4] {
             for cid in divertedCIDs {
                 setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
             }
         }
-        // 清理 bridge 的滚动热键状态 (设备断连后 key-up 永不会触发).
-        emitScrollHotkeyReleaseForActiveCIDs()
+        lastApplied.removeAll()
         divertedCIDs.removeAll()
         discoveredControls.removeAll()
         // timer 已清零, 此时 isActivityInProgress 只剩 discoveryInFlight 一个分量;
@@ -556,7 +587,8 @@ class LogiDeviceSession {
         reprogControlCount = 0
         reprogQueryIndex = 0
         reportingQueryIndex = 0
-        emitScrollHotkeyReleaseForActiveCIDs()
+        releaseAllActiveButtonState(reason: "rediscover")
+        lastApplied.removeAll()
         divertedCIDs.removeAll()
         LogiDebugPanel.log("[\(deviceInfo.name)] Re-discovering features...")
         setDiscoveryInFlight(true)
@@ -579,7 +611,7 @@ class LogiDeviceSession {
     }
 
     func redivertAllControls() {
-        lastActiveCIDs.removeAll()
+        releaseAllActiveButtonState(reason: "redivert")
         reprogInitComplete = true
         divertedCIDs.removeAll()
         lastApplied.removeAll()
@@ -588,10 +620,17 @@ class LogiDeviceSession {
     }
 
     func undivertAllControls() {
-        guard let idx = featureIndex[Self.featureReprogV4] else { return }
+        releaseAllActiveButtonState(reason: "undivert all")
+        guard let idx = featureIndex[Self.featureReprogV4] else {
+            lastApplied.removeAll()
+            reprogInitComplete = false
+            LogiDebugPanel.log("[\(deviceInfo.name)] Cleared local divert state; REPROG feature unavailable")
+            return
+        }
         for cid in divertedCIDs {
             setControlReporting(featureIndex: idx, cid: cid, divert: false)
         }
+        lastApplied.removeAll()
         reprogInitComplete = false
         LogiDebugPanel.log("[\(deviceInfo.name)] Undiverted all controls")
     }
@@ -617,7 +656,8 @@ class LogiDeviceSession {
         reprogControlCount = 0
         reprogQueryIndex = 0
         reportingQueryIndex = 0
-        emitScrollHotkeyReleaseForActiveCIDs()
+        releaseAllActiveButtonState(reason: "target slot changed")
+        lastApplied.removeAll()
         divertedCIDs.removeAll()
         setDiscoveryInFlight(true)
         LogiDebugPanel.log("[\(deviceInfo.name)] Target slot changed to \(slot)")
@@ -1654,7 +1694,6 @@ class LogiDeviceSession {
         reprogInitComplete = true
         handshakeComplete = true
         setDiscoveryInFlight(false)
-        lastActiveCIDs.removeAll()
         primeFromRegistry()
         LogiDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")
     }
@@ -1687,15 +1726,13 @@ class LogiDeviceSession {
             activeCIDs.insert(cid)
             offset += 2
         }
-        let newlyPressed = activeCIDs.subtracting(lastActiveCIDs)
-        let newlyReleased = lastActiveCIDs.subtracting(activeCIDs)
-        lastActiveCIDs = activeCIDs
-        for cid in newlyPressed {
+        let delta = buttonStateTracker.update(activeCIDs: activeCIDs)
+        for cid in delta.pressed {
             let cidName = LogiCIDDirectory.name(forCID: cid)
             LogiDebugPanel.log(device: deviceInfo.name, type: .buttonEvent, message: "Button DOWN: CID \(String(format: "0x%04X", cid)) (\(cidName))")
             dispatchButtonEvent(cid: cid, isDown: true)
         }
-        for cid in newlyReleased {
+        for cid in delta.released {
             let cidName = LogiCIDDirectory.name(forCID: cid)
             LogiDebugPanel.log(device: deviceInfo.name, type: .buttonEvent, message: "Button UP: CID \(String(format: "0x%04X", cid)) (\(cidName))")
             dispatchButtonEvent(cid: cid, isDown: false)
@@ -1704,18 +1741,33 @@ class LogiDeviceSession {
 
     // MARK: - Event Dispatch
 
-    /// Emit synthetic .up scroll-hotkey events for any CIDs the device left
-    /// "pressed" before a teardown / slot change / rediscovery, then clear the
-    /// per-session activity caches. Without this, ScrollCore's internal hotkey
-    /// state could stay latched on a key that will never receive a real release.
-    private func emitScrollHotkeyReleaseForActiveCIDs() {
-        let bridge = LogiCenter.shared.externalBridge
-        for cid in lastActiveCIDs {
-            let mosCode = LogiCIDDirectory.toMosCode(cid)
-            bridge.handleLogiScrollHotkey(code: mosCode, phase: .up)
+    /// Emit synthetic releases when Mos changes divert/session ownership and a
+    /// physical release may never arrive. Route through normal dispatch so
+    /// mouse mappings, virtual modifiers, and Mos Scroll all unwind together.
+    private func releaseAllActiveButtonState(reason: String) {
+        emitSyntheticButtonReleases(
+            for: buttonStateTracker.releaseAll(),
+            reason: reason
+        )
+    }
+
+    private func releaseActiveButtonState(for cids: Set<UInt16>, reason: String) {
+        emitSyntheticButtonReleases(
+            for: buttonStateTracker.releaseActiveCIDs(in: cids),
+            reason: reason
+        )
+    }
+
+    private func emitSyntheticButtonReleases(for cids: Set<UInt16>, reason: String) {
+        for cid in cids.sorted() {
+            let cidName = LogiCIDDirectory.name(forCID: cid)
+            LogiDebugPanel.log(
+                device: deviceInfo.name,
+                type: .buttonEvent,
+                message: "Synthetic Button UP: CID \(String(format: "0x%04X", cid)) (\(cidName)) [\(reason)]"
+            )
+            dispatchButtonEvent(cid: cid, isDown: false)
         }
-        lastActiveCIDs.removeAll()
-        self.lastApplied.removeAll()
     }
 
     private func dispatchButtonEvent(cid: UInt16, isDown: Bool) {

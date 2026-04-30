@@ -7,6 +7,32 @@ import XCTest
 /// double's recording semantics.
 final class LogiBridgeDispatchTests: XCTestCase {
 
+    func testButtonStateTrackerPreservesPressUntilMatchingReleaseReport() {
+        var tracker = LogiButtonStateTracker()
+
+        let down = tracker.update(activeCIDs: [0x0052])
+        let duplicateDown = tracker.update(activeCIDs: [0x0052])
+        let up = tracker.update(activeCIDs: [])
+
+        XCTAssertEqual(down.pressed, [0x0052])
+        XCTAssertTrue(down.released.isEmpty)
+        XCTAssertTrue(duplicateDown.pressed.isEmpty)
+        XCTAssertTrue(duplicateDown.released.isEmpty)
+        XCTAssertTrue(up.pressed.isEmpty)
+        XCTAssertEqual(up.released, [0x0052])
+    }
+
+    func testButtonStateTrackerSyntheticReleaseClearsOnlyRequestedActiveCIDs() {
+        var tracker = LogiButtonStateTracker()
+        _ = tracker.update(activeCIDs: [0x0052, 0x0056])
+
+        let released = tracker.releaseActiveCIDs(in: [0x0052, 0x00C4])
+        let remainingRelease = tracker.update(activeCIDs: [])
+
+        XCTAssertEqual(released, [0x0052])
+        XCTAssertEqual(remainingRelease.released, [0x0056])
+    }
+
     func testFakeBridgeRecordsCalls() {
         let fake = FakeLogiExternalBridge()
         let event = InputEvent(
