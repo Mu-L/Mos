@@ -84,16 +84,16 @@ struct ActionDisplayRenderer {
 
         case .namedAction:
             let baseImage = createSymbolImage(named: presentation.symbolName)
-            let withBrand = prefixedImageIfNeeded(baseImage, brand: presentation.brand)
-            let prepared = withBrand.map { SelectorImage.prepared($0) }
+            let withTag = prefixedImageIfNeeded(baseImage, tag: presentation.tag)
+            let prepared = withTag.map { SelectorImage.prepared($0) }
             apply(title: presentation.title, image: prepared, placeholderItem: placeholderItem, popupButton: popupButton)
 
         case .keyCombo:
             // keyCombo 的内容全部在 badge image 里; 不要给 button face 单独缩放,
             // 否则 menu 第一行和 button face 的可见 badge 尺寸会分裂.
             let badgeImage = Self.createBadgeImage(from: presentation.badgeComponents)
-            let withBrand = prefixedImageIfNeeded(badgeImage, brand: presentation.brand)
-            let prepared = withBrand.map { SelectorImage.prepared($0) }
+            let withTag = prefixedImageIfNeeded(badgeImage, tag: presentation.tag)
+            let prepared = withTag.map { SelectorImage.prepared($0) }
             apply(
                 title: presentation.title,
                 image: prepared,
@@ -194,9 +194,9 @@ struct ActionDisplayRenderer {
         return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
     }
 
-    private func prefixedImageIfNeeded(_ image: NSImage?, brand: BrandTagConfig?) -> NSImage? {
-        guard let brand else { return image }
-        return BrandTag.createPrefixedImage(brand: brand, original: image)
+    private func prefixedImageIfNeeded(_ image: NSImage?, tag: BrandTagConfig?) -> NSImage? {
+        guard let tag else { return image }
+        return BrandTag.createPrefixedImage(brand: tag, original: image)
     }
 
     static func createBadgeImage(from components: [String]) -> NSImage {

@@ -19,7 +19,8 @@ struct ActionPresentation {
     let symbolName: String?
     let image: NSImage?
     let badgeComponents: [String]
-    let brand: BrandTagConfig?
+    let tag: BrandTagConfig?
+    var brand: BrandTagConfig? { tag }
 
     init(
         kind: ActionPresentationKind,
@@ -27,6 +28,7 @@ struct ActionPresentation {
         symbolName: String? = nil,
         image: NSImage? = nil,
         badgeComponents: [String] = [],
+        tag: BrandTagConfig? = nil,
         brand: BrandTagConfig? = nil
     ) {
         self.kind = kind
@@ -34,7 +36,7 @@ struct ActionPresentation {
         self.symbolName = symbolName
         self.image = image
         self.badgeComponents = badgeComponents
-        self.brand = brand
+        self.tag = tag ?? brand
     }
 }
 
@@ -135,7 +137,7 @@ struct ActionDisplayResolver {
             kind: .namedAction,
             title: shortcut.localizedName,
             symbolName: shortcut.symbolName,
-            brand: BrandTag.brandForAction(shortcut.identifier)
+            tag: BrandTag.tagForAction(shortcut.identifier)
         )
     }
 
@@ -183,12 +185,12 @@ struct ActionDisplayResolver {
             return nil
         }
 
-        let brand = BrandTag.brandForCode(code)
-        if let brand, modifiers == 0, LogiCenter.shared.isLogiCode(code) {
+        let tag = BrandTag.tagForCode(code)
+        if let tag, modifiers == 0, LogiCenter.shared.isLogiCode(code) {
             return ActionPresentation(
                 kind: .namedAction,
                 title: (LogiCenter.shared.name(forMosCode: code) ?? ""),
-                brand: brand
+                tag: tag
             )
         }
 
@@ -200,7 +202,7 @@ struct ActionDisplayResolver {
             source: .hidPP,
             device: nil
         )
-        let marker = brand.map { "[\($0.name)]" }
+        let marker = tag.map { "[\($0.name)]" }
         let badgeComponents = event.displayComponents.filter { component in
             guard let marker else { return true }
             return component != marker
@@ -210,7 +212,7 @@ struct ActionDisplayResolver {
             kind: .keyCombo,
             title: "",
             badgeComponents: badgeComponents,
-            brand: brand
+            tag: tag
         )
     }
 

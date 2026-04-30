@@ -33,16 +33,47 @@ enum MouseButtonActionKind {
     }
 }
 
+enum MosScrollActionKind {
+    case dash
+    case toggle
+    case block
+
+    init?(shortcutIdentifier: String) {
+        switch shortcutIdentifier {
+        case "mosScrollDash":
+            self = .dash
+        case "mosScrollToggle":
+            self = .toggle
+        case "mosScrollBlock":
+            self = .block
+        default:
+            return nil
+        }
+    }
+
+    var role: ScrollRole {
+        switch self {
+        case .dash:
+            return .dash
+        case .toggle:
+            return .toggle
+        case .block:
+            return .block
+        }
+    }
+}
+
 enum ResolvedAction {
     case customKey(code: UInt16, modifiers: UInt64)
     case mouseButton(kind: MouseButtonActionKind)
+    case mosScroll(role: ScrollRole)
     case systemShortcut(identifier: String)
     case logiAction(identifier: String)
     case openTarget(payload: OpenTargetPayload)
 
     var executionMode: ActionExecutionMode {
         switch self {
-        case .customKey, .mouseButton:
+        case .customKey, .mouseButton, .mosScroll:
             return .stateful
         case .logiAction, .openTarget:
             return .trigger
@@ -59,6 +90,12 @@ struct ActionExecutionResult {
     static let none = ActionExecutionResult(mouseSessionID: nil)
 }
 
+struct MouseTapReplayContext {
+    let buttonNumber: Int64
+    let location: CGPoint?
+    let modifiers: CGEventFlags
+}
+
 class ShortcutExecutor {
 
     // 单例
@@ -68,6 +105,11 @@ class ShortcutExecutor {
     }
 
     private var testingMouseEventObserver: ((CGEvent) -> Void)?
+
+    /// 快速识别 Mos Scroll 三个 stateful 动作, 供事件热路径避免完整 action 解析。
+    static func isMosScrollActionIdentifier(_ shortcutName: String) -> Bool {
+        MosScrollActionKind(shortcutIdentifier: shortcutName) != nil
+    }
 
     // MARK: - 执行快捷键 (统一接口)
 
@@ -133,6 +175,9 @@ class ShortcutExecutor {
                     inputModifiers: inputModifiers
                 )
             )
+        case .mosScroll(let role):
+            ScrollCore.shared.handleMosScrollAction(role: role, isDown: phase == .down)
+            return .none
         case .logiAction(let identifier):
             guard phase == .down else { return .none }
             executeLogiAction(identifier)
@@ -163,6 +208,9 @@ class ShortcutExecutor {
         }
         if let kind = MouseButtonActionKind(shortcutIdentifier: shortcutName) {
             return .mouseButton(kind: kind)
+        }
+        if let scrollAction = MosScrollActionKind(shortcutIdentifier: shortcutName) {
+            return .mosScroll(role: scrollAction.role)
         }
         if shortcutName.hasPrefix("logi") {
             return .logiAction(identifier: shortcutName)
@@ -272,6 +320,29 @@ class ShortcutExecutor {
         testingMouseEventObserver = nil
     }
 
+    func mouseTapReplayContext(for event: InputEvent) -> MouseTapReplayContext? {
+        guard event.type == .mouse,
+              let buttonNumber = mouseButtonNumberForTapReplay(event) else {
+            return nil
+        }
+        let location: CGPoint?
+        if case .cgEvent(let cgEvent) = event.source {
+            location = cgEvent.location
+        } else {
+            location = nil
+        }
+        return MouseTapReplayContext(
+            buttonNumber: buttonNumber,
+            location: location,
+            modifiers: event.modifiers
+        )
+    }
+
+    func replayMouseTap(_ context: MouseTapReplayContext) {
+        replayMouseEvent(context, phase: .down)
+        replayMouseEvent(context, phase: .up)
+    }
+
     private func syntheticTarget(for kind: MouseButtonActionKind) -> SyntheticMouseTarget {
         switch kind {
         case .left:
@@ -287,6 +358,48 @@ class ShortcutExecutor {
         }
     }
 
+    private func mouseButtonNumberForTapReplay(_ event: InputEvent) -> Int64? {
+        switch event.code {
+        case 2...20:
+            return Int64(event.code)
+        case 1003:
+            return 0
+        case 1004:
+            return 1
+        case 1005:
+            return 2
+        case 1006:
+            return 3
+        case 1007:
+            return 4
+        default:
+            return nil
+        }
+    }
+
+    private func replayMouseEvent(
+        _ context: MouseTapReplayContext,
+        phase: InputPhase
+    ) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        let spec = mouseEventSpec(buttonNumber: context.buttonNumber, phase: phase)
+        guard let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: spec.type,
+            mouseCursorPosition: context.location ?? currentMouseLocationForCGEvent(),
+            mouseButton: spec.button
+        ) else {
+            return
+        }
+
+        if let buttonNumber = spec.buttonNumber {
+            event.setIntegerValueField(.mouseEventButtonNumber, value: buttonNumber)
+        }
+        event.flags = InputProcessor.shared.combinedModifierFlags(physicalModifiers: context.modifiers)
+        event.setIntegerValueField(.eventSourceUserData, value: MosEventMarker.syntheticCustom)
+        notifyOrPostMouseEvent(event)
+    }
+
     private func mouseEventSpec(for kind: MouseButtonActionKind, phase: InputPhase) -> (type: CGEventType, button: CGMouseButton, buttonNumber: Int64?) {
         switch kind {
         case .left:
@@ -300,6 +413,23 @@ class ShortcutExecutor {
         case .forward:
             return (phase == .down ? .otherMouseDown : .otherMouseUp, .center, 4)
         }
+    }
+
+    private func mouseEventSpec(buttonNumber: Int64, phase: InputPhase) -> (type: CGEventType, button: CGMouseButton, buttonNumber: Int64?) {
+        switch buttonNumber {
+        case 0:
+            return (phase == .down ? .leftMouseDown : .leftMouseUp, .left, nil)
+        case 1:
+            return (phase == .down ? .rightMouseDown : .rightMouseUp, .right, nil)
+        default:
+            return (phase == .down ? .otherMouseDown : .otherMouseUp, .center, buttonNumber)
+        }
+    }
+
+    private func currentMouseLocationForCGEvent() -> CGPoint {
+        let location = NSEvent.mouseLocation
+        let screenHeight = NSScreen.main?.frame.height ?? 0
+        return CGPoint(x: location.x, y: screenHeight - location.y)
     }
 
     // MARK: - Logi HID++ Actions

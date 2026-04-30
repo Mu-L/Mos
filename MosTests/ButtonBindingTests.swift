@@ -320,6 +320,10 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertNil(SystemShortcut.displayShortcut(matchingBindingName: "custom::34:\(modifiers)"))
     }
 
+    func testDisplayShortcut_doesNotMatchMosScrollPlaceholderCode() {
+        XCTAssertNil(SystemShortcut.displayShortcut(matchingBindingName: "custom::65532:0"))
+    }
+
     func testActionDisplayResolver_prioritizesRecordingPromptOverExistingShortcut() {
         let presentation = makeResolvedPresentation(
             shortcut: SystemShortcut.screenshotSelection,
@@ -349,6 +353,39 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(presentation.title, "Forward Button")
         XCTAssertTrue(presentation.badgeComponents.isEmpty)
         XCTAssertEqual(presentation.brand?.name, BrandTagConfig.logi.name)
+    }
+
+    func testActionTagConfig_mosUsesNeonLogoPalette() {
+        let tag = BrandTagConfig.mos
+        let bgColor = tag.bgColor.usingColorSpace(.deviceRGB)
+        let textColor = tag.textColor.usingColorSpace(.deviceRGB)
+        let innerHighlightColor = tag.innerHighlightColor?.usingColorSpace(.deviceRGB)
+        let gradientColors = tag.gradientColors?.compactMap { $0.usingColorSpace(.deviceRGB) }
+
+        XCTAssertEqual(tag.name, "Mos")
+        XCTAssertLessThan(bgColor?.redComponent ?? 1, 0.15)
+        XCTAssertLessThan(bgColor?.greenComponent ?? 1, 0.18)
+        XCTAssertLessThan(bgColor?.blueComponent ?? 1, 0.35)
+        XCTAssertGreaterThan(textColor?.redComponent ?? 0, 0.8)
+        XCTAssertGreaterThan(textColor?.greenComponent ?? 0, 0.9)
+        XCTAssertGreaterThan(textColor?.blueComponent ?? 0, 0.95)
+        XCTAssertNil(tag.borderColor)
+        XCTAssertNotNil(innerHighlightColor)
+        XCTAssertGreaterThan(innerHighlightColor?.blueComponent ?? 0, 0.8)
+        XCTAssertLessThan(innerHighlightColor?.alphaComponent ?? 1, 0.25)
+        XCTAssertEqual(gradientColors?.count, 2)
+        XCTAssertGreaterThan(gradientColors?.first?.blueComponent ?? 0, 0.35)
+        XCTAssertGreaterThan(gradientColors?.last?.blueComponent ?? 0, 0.55)
+        XCTAssertGreaterThan(gradientColors?.last?.redComponent ?? 0, 0.35)
+    }
+
+    func testActionDisplayResolver_mosScrollShortcutUsesReusableMosTag() {
+        let presentation = makeResolvedPresentation(shortcut: SystemShortcut.mosScrollDash)
+
+        XCTAssertEqual(presentation.kind, .namedAction)
+        XCTAssertEqual(presentation.title, SystemShortcut.mosScrollDash.localizedName)
+        XCTAssertEqual(presentation.tag?.name, BrandTagConfig.mos.name)
+        XCTAssertEqual(presentation.brand?.name, BrandTagConfig.mos.name)
     }
 
     func testConfiguredButtonCell_showsBrandedNamedDisplayForSingleLogiCustomBinding() {
@@ -647,6 +684,37 @@ final class ButtonBindingTests: XCTestCase {
             modifierItems,
             ["modifierShift", "modifierOption", "modifierControl", "modifierCommand", "modifierFn"]
         )
+    }
+
+    func testBuildShortcutMenu_placesMosMouseScrollBelowMouseButtons() {
+        let menu = NSMenu()
+        let target = ShortcutMenuTestTarget()
+
+        ShortcutManager.buildShortcutMenu(
+            into: menu,
+            target: target,
+            action: #selector(ShortcutMenuTestTarget.noop(_:)),
+            showLogiActions: true
+        )
+
+        let mouseCategoryName = SystemShortcut.localizedCategoryName(SystemShortcut.mouseButtonsCategory.category)
+        let mosCategoryName = SystemShortcut.localizedCategoryName(SystemShortcut.mosMouseScrollCategory.category)
+        let logiCategoryName = SystemShortcut.localizedCategoryName(SystemShortcut.logiActionsCategory.category)
+
+        guard let mouseIndex = menu.items.firstIndex(where: { $0.title == mouseCategoryName }),
+              let mosIndex = menu.items.firstIndex(where: { $0.title == mosCategoryName }),
+              let logiIndex = menu.items.firstIndex(where: { $0.title == logiCategoryName }) else {
+            return XCTFail("Expected mouse, Mos scroll, and Logi categories to exist in shortcut menu")
+        }
+
+        XCTAssertLessThan(mouseIndex, mosIndex)
+        XCTAssertLessThan(mosIndex, logiIndex)
+        XCTAssertNotNil(menu.items[mosIndex].image)
+
+        let mosItems = menu.items[mosIndex].submenu?.items.compactMap {
+            ($0.representedObject as? SystemShortcut.Shortcut)?.identifier
+        }
+        XCTAssertEqual(mosItems, ["mosScrollDash", "mosScrollToggle", "mosScrollBlock"])
     }
 
     func testBuildShortcutMenu_includesOpenTargetEntryAboveCustom() {
