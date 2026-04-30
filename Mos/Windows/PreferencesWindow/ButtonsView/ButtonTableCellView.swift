@@ -10,6 +10,7 @@
 import Cocoa
 
 class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
+    private static let appearanceChangedNotification = NSNotification.Name("AppleInterfaceThemeChangedNotification")
 
     // MARK: - IBOutlets
     @IBOutlet weak var keyDisplayContainerView: NSView!
@@ -63,6 +64,16 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
 
     private var originalRowBackgroundColor: NSColor?
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerAppearanceObserver()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerAppearanceObserver()
+    }
+
     // MARK: - 配置方法
     func configure(
         with binding: ButtonBinding,
@@ -108,7 +119,39 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     }
 
     deinit {
+        DistributedNotificationCenter.default().removeObserver(self, name: Self.appearanceChangedNotification, object: nil)
         unregisterConflictObservers()
+    }
+
+    private func registerAppearanceObserver() {
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(appearanceChanged),
+            name: Self.appearanceChangedNotification,
+            object: nil
+        )
+    }
+
+    @objc private func appearanceChanged() {
+        refreshForAppearanceChange()
+    }
+
+    @available(macOS 10.14, *)
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshForAppearanceChange()
+    }
+
+    private func refreshForAppearanceChange() {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshActionDisplayForAppearanceChange()
+        }
+    }
+
+    private func refreshActionDisplayForAppearanceChange() {
+        guard actionPopUpButton != nil else { return }
+        refreshActionDisplay()
+        actionPopUpButton.needsDisplay = true
     }
 
     // 高亮该行（重复两次）

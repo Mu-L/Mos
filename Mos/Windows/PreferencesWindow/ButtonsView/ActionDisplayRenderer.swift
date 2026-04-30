@@ -60,6 +60,24 @@ struct ActionDisplayRenderer {
             return
         }
 
+        let renderBody = {
+            renderResolved(presentation, placeholderItem: placeholderItem, popupButton: popupButton)
+        }
+        if #available(macOS 10.14, *) {
+            let previousAppearance = NSAppearance.current
+            NSAppearance.current = popupButton.effectiveAppearance
+            defer { NSAppearance.current = previousAppearance }
+            renderBody()
+        } else {
+            renderBody()
+        }
+    }
+
+    private func renderResolved(
+        _ presentation: ActionPresentation,
+        placeholderItem: NSMenuItem,
+        popupButton: NSPopUpButton
+    ) {
         switch presentation.kind {
         case .unbound, .recordingPrompt:
             apply(title: presentation.title, image: nil, placeholderItem: placeholderItem, popupButton: popupButton)
@@ -71,10 +89,18 @@ struct ActionDisplayRenderer {
             apply(title: presentation.title, image: prepared, placeholderItem: placeholderItem, popupButton: popupButton)
 
         case .keyCombo:
+            // keyCombo 的内容全部在 badge image 里; 不要给 button face 单独缩放,
+            // 否则 menu 第一行和 button face 的可见 badge 尺寸会分裂.
             let badgeImage = Self.createBadgeImage(from: presentation.badgeComponents)
             let withBrand = prefixedImageIfNeeded(badgeImage, brand: presentation.brand)
             let prepared = withBrand.map { SelectorImage.prepared($0) }
-            apply(title: presentation.title, image: prepared, placeholderItem: placeholderItem, popupButton: popupButton)
+            apply(
+                title: presentation.title,
+                image: prepared,
+                placeholderItem: placeholderItem,
+                popupButton: popupButton,
+                usePaddedButtonFaceImage: false
+            )
 
         case .openTarget:
             let resizedImage = presentation.image.map { Self.resizeForBadge($0) }
@@ -105,7 +131,8 @@ struct ActionDisplayRenderer {
         title: String,
         image: SelectorImage?,
         placeholderItem: NSMenuItem,
-        popupButton: NSPopUpButton
+        popupButton: NSPopUpButton,
+        usePaddedButtonFaceImage: Bool = true
     ) {
         // menu 展开第一行 — placeholderItem (raw, 由 NSMenuItemCell 提供间距)
         placeholderItem.title = title
@@ -128,7 +155,9 @@ struct ActionDisplayRenderer {
                 string: title,
                 attributes: [.baselineOffset: 1.0]
             )
-            buttonFaceItem.image = image.map { Self.menuAlignedImage($0.padded) }
+            buttonFaceItem.image = image.map {
+                Self.menuAlignedImage(usePaddedButtonFaceImage ? $0.padded : $0.raw)
+            }
             cell.menuItem = buttonFaceItem
         }
         popupButton.imagePosition = .imageLeft
@@ -143,17 +172,19 @@ struct ActionDisplayRenderer {
         let imageSize = image.size
         guard imageSize.height > 0, imageSize.height <= targetHeight else { return image }
 
+        let imageY = (targetHeight - imageSize.height) / 2
         let alignedSize = NSSize(width: imageSize.width, height: targetHeight)
         let alignedImage = NSImage(size: alignedSize)
         alignedImage.lockFocus()
         image.draw(
-            in: NSRect(x: 0, y: (targetHeight - imageSize.height) / 2, width: imageSize.width, height: imageSize.height),
+            in: NSRect(x: 0, y: imageY, width: imageSize.width, height: imageSize.height),
             from: NSRect(origin: .zero, size: imageSize),
             operation: .sourceOver,
             fraction: 1.0
         )
         alignedImage.unlockFocus()
         alignedImage.isTemplate = image.isTemplate
+
         return alignedImage
     }
 
@@ -178,6 +209,15 @@ struct ActionDisplayRenderer {
         let plusSpacing: CGFloat = 3
         let iconSize: CGFloat = 11
         let iconTrailingGap: CGFloat = 4
+        let trailingSafetyPadding: CGFloat = 2.5
+        let keyboardImage: NSImage?
+        if #available(macOS 11.0, *) {
+            let symbol = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)
+            let config = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
+            keyboardImage = symbol?.withSymbolConfiguration(config) ?? symbol
+        } else {
+            keyboardImage = nil
+        }
 
         struct BadgeMetrics {
             let text: String
@@ -201,30 +241,31 @@ struct ActionDisplayRenderer {
         }
 
         var iconWidth: CGFloat = 0
-        if #available(macOS 11.0, *) {
-            iconWidth = iconSize + iconTrailingGap
+        if let keyboardImage {
+            iconWidth = keyboardImage.size.width + iconTrailingGap
         }
         totalWidth += iconWidth
 
-        // 不再内嵌 trailing padding — 由 SelectorImage.prepared 统一加, 保证三个 case 的 raw 都不含外加 padding.
-        let imageSize = NSSize(width: ceil(totalWidth), height: badgeHeight)
-        return NSImage(size: imageSize, flipped: false) { _ in
+        // keyCombo 的主要内容在这张 badge image 里, 最后一个 badge 不能贴着 bitmap 右边界画,
+        // 否则 button face/menu 的 clip 都可能吃掉最后一列像素.
+        let imageSize = NSSize(width: ceil(totalWidth + trailingSafetyPadding), height: badgeHeight)
+        return NSImage(size: imageSize, flipped: false) { canvasRect in
+            NSColor.clear.setFill()
+            canvasRect.fill(using: .copy)
+
             var x: CGFloat = 0
 
-            if #available(macOS 11.0, *),
-               let symbol = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil) {
-                let config = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
-                let configured = symbol.withSymbolConfiguration(config) ?? symbol
-                let symbolSize = configured.size
+            if let keyboardImage {
+                let symbolSize = keyboardImage.size
                 let iconY = (badgeHeight - symbolSize.height) / 2
                 let iconRect = NSRect(x: x, y: iconY, width: symbolSize.width, height: symbolSize.height)
-                configured.draw(in: iconRect)
-                NSColor.secondaryLabelColor.set()
+                keyboardImage.draw(in: iconRect)
+                NSColor.labelColor.set()
                 iconRect.fill(using: .sourceAtop)
                 x += symbolSize.width + iconTrailingGap
             }
 
-            let bgColor = Utils.isDarkMode(for: nil)
+            let bgColor = Self.isDarkModeForCurrentAppearance()
                 ? NSColor(calibratedWhite: 0.5, alpha: 0.2)
                 : NSColor(calibratedWhite: 0.0, alpha: 0.1)
             let textColor = NSColor.labelColor
@@ -259,5 +300,19 @@ struct ActionDisplayRenderer {
             }
             return true
         }
+    }
+
+    private static func isDarkModeForCurrentAppearance() -> Bool {
+        if #available(macOS 10.14, *) {
+            return NSAppearance.current.bestMatch(
+                from: [
+                    .darkAqua,
+                    .vibrantDark,
+                    .accessibilityHighContrastDarkAqua,
+                    .accessibilityHighContrastVibrantDark
+                ]
+            ) != nil
+        }
+        return Utils.isDarkMode(for: nil)
     }
 }

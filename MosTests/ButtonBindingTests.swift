@@ -59,6 +59,131 @@ final class ButtonBindingTests: XCTestCase {
         return actionButton
     }
 
+    private func opaqueBounds(in image: NSImage) -> NSRect? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              image.size.width > 0,
+              image.size.height > 0 else {
+            return nil
+        }
+
+        var minX = rep.pixelsWide
+        var minY = rep.pixelsHigh
+        var maxX = -1
+        var maxY = -1
+
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let color = rep.colorAt(x: x, y: y),
+                      color.alphaComponent > 0.05 else {
+                    continue
+                }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+
+        guard maxX >= minX, maxY >= minY else { return nil }
+
+        let scaleX = CGFloat(rep.pixelsWide) / image.size.width
+        let scaleY = CGFloat(rep.pixelsHigh) / image.size.height
+        return NSRect(
+            x: CGFloat(minX) / scaleX,
+            y: CGFloat(minY) / scaleY,
+            width: CGFloat(maxX - minX + 1) / scaleX,
+            height: CGFloat(maxY - minY + 1) / scaleY
+        )
+    }
+
+    private func assertUsesDefaultAlignmentRect(_ image: NSImage, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(
+            NSEqualRects(image.alignmentRect, NSRect(origin: .zero, size: image.size)),
+            "Expected default alignmentRect, got \(image.alignmentRect) for image size \(image.size)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertHasTrailingVisiblePadding(
+        _ image: NSImage,
+        minimumPadding: CGFloat,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let bounds = opaqueBounds(in: image) else {
+            return XCTFail("Expected image to contain visible pixels", file: file, line: line)
+        }
+
+        let trailingPadding = image.size.width - bounds.maxX
+        XCTAssertGreaterThanOrEqual(
+            trailingPadding,
+            minimumPadding,
+            "Expected at least \(minimumPadding)pt trailing padding after visible content, got \(trailingPadding)pt for image size \(image.size) and bounds \(bounds)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func averageVisibleLuminance(in image: NSImage) -> CGFloat? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else {
+            return nil
+        }
+
+        var weightedTotal: CGFloat = 0
+        var totalWeight: CGFloat = 0
+
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let sourceColor = rep.colorAt(x: x, y: y),
+                      sourceColor.alphaComponent > 0.05,
+                      let color = sourceColor.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+
+                let alpha = color.alphaComponent
+                let luminance = 0.2126 * color.redComponent
+                    + 0.7152 * color.greenComponent
+                    + 0.0722 * color.blueComponent
+                weightedTotal += luminance * alpha
+                totalWeight += alpha
+            }
+        }
+
+        guard totalWeight > 0 else { return nil }
+        return weightedTotal / totalWeight
+    }
+
+    private func keyComboBadgeWidthWithoutTrailingSafetyPadding(components: [String]) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 9, weight: .medium)
+        let plusFont = NSFont.systemFont(ofSize: 9)
+        let badgeHeight: CGFloat = 17
+        let hPadding: CGFloat = 5
+        let plusSpacing: CGFloat = 3
+        let iconWidth: CGFloat
+        if #available(macOS 11.0, *) {
+            let symbol = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)
+            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+            let keyboardImage = symbol?.withSymbolConfiguration(config) ?? symbol
+            iconWidth = (keyboardImage?.size.width ?? 0) + 4
+        } else {
+            iconWidth = 0
+        }
+
+        var totalWidth = iconWidth
+        for (index, component) in components.enumerated() {
+            let textSize = (component as NSString).size(withAttributes: [.font: font])
+            totalWidth += max(textSize.width + hPadding * 2, badgeHeight)
+            if index > 0 {
+                let plusSize = ("+" as NSString).size(withAttributes: [.font: plusFont])
+                totalWidth += plusSpacing * 2 + plusSize.width
+            }
+        }
+        return ceil(totalWidth)
+    }
+
     func testPrepareCustomCache_regularKey() {
         var binding = ButtonBinding(
             triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
@@ -305,6 +430,135 @@ final class ButtonBindingTests: XCTestCase {
 
         XCTAssertEqual(popupButton.menu?.items.first?.title, "")
         XCTAssertNotNil(popupButton.menu?.items.first?.image)
+    }
+
+    func testActionDisplayRenderer_keyComboButtonFaceKeepsMenuImageScale() {
+        for badgeComponents in [
+            ["⌃", "⌥", "⇧", "⌘"],
+            ["⌥", "M"],
+            ["⌃", "I"]
+        ] {
+            let popupButton = makeActionPopupButton()
+            let presentation = ActionPresentation(
+                kind: .keyCombo,
+                title: "",
+                symbolName: nil,
+                badgeComponents: badgeComponents,
+                brand: nil
+            )
+
+            ActionDisplayRenderer().render(presentation, into: popupButton)
+
+            guard let placeholderImage = popupButton.menu?.items.first?.image,
+                  let cell = popupButton.cell as? NSPopUpButtonCell,
+                  let buttonFaceImage = cell.menuItem?.image else {
+                return XCTFail("Expected key combo render path to create both menu and button-face images")
+            }
+
+            XCTAssertEqual(popupButton.menu?.items.first?.title, "")
+            XCTAssertEqual(cell.menuItem?.title, "")
+            assertUsesDefaultAlignmentRect(placeholderImage)
+            assertUsesDefaultAlignmentRect(buttonFaceImage)
+            XCTAssertEqual(buttonFaceImage.size.width, placeholderImage.size.width, accuracy: 0.01)
+            XCTAssertEqual(buttonFaceImage.size.height, placeholderImage.size.height, accuracy: 0.01)
+            let unpaddedWidth = keyComboBadgeWidthWithoutTrailingSafetyPadding(components: badgeComponents)
+            XCTAssertGreaterThanOrEqual(buttonFaceImage.size.width - unpaddedWidth, 2)
+            XCTAssertLessThanOrEqual(buttonFaceImage.size.width - unpaddedWidth, 4)
+            assertHasTrailingVisiblePadding(placeholderImage, minimumPadding: 1.5)
+            assertHasTrailingVisiblePadding(buttonFaceImage, minimumPadding: 1.5)
+
+            guard let menuBounds = opaqueBounds(in: placeholderImage),
+                  let buttonFaceBounds = opaqueBounds(in: buttonFaceImage) else {
+                return XCTFail("Expected both menu and button-face images to contain visible pixels")
+            }
+            XCTAssertEqual(buttonFaceBounds.width, menuBounds.width, accuracy: 0.75)
+            XCTAssertEqual(buttonFaceBounds.height, menuBounds.height, accuracy: 0.75)
+        }
+    }
+
+    func testActionDisplayRenderer_keyComboUsesPopupButtonAppearanceWhenRasterizing() {
+        guard #available(macOS 10.14, *),
+              let darkAppearance = NSAppearance(named: .darkAqua),
+              let lightAppearance = NSAppearance(named: .aqua) else {
+            return
+        }
+
+        let previousCurrentAppearance = NSAppearance.current
+        defer { NSAppearance.current = previousCurrentAppearance }
+
+        let presentation = ActionPresentation(
+            kind: .keyCombo,
+            title: "",
+            symbolName: nil,
+            badgeComponents: ["⌃", "K"],
+            brand: nil
+        )
+
+        let darkPopupButton = makeActionPopupButton()
+        darkPopupButton.appearance = darkAppearance
+        NSAppearance.current = lightAppearance
+        ActionDisplayRenderer().render(presentation, into: darkPopupButton)
+
+        let lightPopupButton = makeActionPopupButton()
+        lightPopupButton.appearance = lightAppearance
+        NSAppearance.current = darkAppearance
+        ActionDisplayRenderer().render(presentation, into: lightPopupButton)
+
+        guard let darkImage = (darkPopupButton.cell as? NSPopUpButtonCell)?.menuItem?.image,
+              let lightImage = (lightPopupButton.cell as? NSPopUpButtonCell)?.menuItem?.image,
+              let darkLuminance = averageVisibleLuminance(in: darkImage),
+              let lightLuminance = averageVisibleLuminance(in: lightImage) else {
+            return XCTFail("Expected keyCombo images with visible pixels")
+        }
+
+        XCTAssertGreaterThan(
+            darkLuminance,
+            lightLuminance + 0.2,
+            "Expected keyCombo bitmap colors to follow the popup button appearance, not NSAppearance.current"
+        )
+    }
+
+    func testButtonTableCellView_refreshesKeyComboImageWhenAppearanceChanges() {
+        guard #available(macOS 10.14, *) else { return }
+
+        let previousAppearance = NSApp.appearance
+        defer { NSApp.appearance = previousAppearance }
+
+        guard let darkAppearance = NSAppearance(named: .darkAqua),
+              let lightAppearance = NSAppearance(named: .aqua) else {
+            return
+        }
+
+        NSApp.appearance = darkAppearance
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil),
+            systemShortcutName: "custom::40:1048576",
+            isEnabled: true
+        )
+        let cell = makeButtonCell(binding: binding)
+        cell.actionPopUpButton.appearance = darkAppearance
+        cell.refreshActionDisplay()
+
+        guard let darkImageData = (cell.actionPopUpButton.cell as? NSPopUpButtonCell)?
+            .menuItem?
+            .image?
+            .tiffRepresentation else {
+            return XCTFail("Expected keyCombo button face image before appearance change")
+        }
+
+        NSApp.appearance = lightAppearance
+        cell.actionPopUpButton.appearance = lightAppearance
+        cell.viewDidChangeEffectiveAppearance()
+        advanceMainRunLoop(by: 0.15)
+
+        guard let lightImageData = (cell.actionPopUpButton.cell as? NSPopUpButtonCell)?
+            .menuItem?
+            .image?
+            .tiffRepresentation else {
+            return XCTFail("Expected keyCombo button face image after appearance change")
+        }
+
+        XCTAssertNotEqual(darkImageData, lightImageData)
     }
 
     // MARK: - ActionPresentation openTarget
