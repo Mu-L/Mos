@@ -149,6 +149,15 @@ struct RecordedEvent: Codable, Equatable {
         self.deviceFilter = deviceFilter
     }
 
+    func standardMouseAliasTriggerIfAvailable() -> RecordedEvent? {
+        return LogiStandardMouseButtonAlias.convertedRecordedEvent(from: self)
+    }
+
+    func normalizedForButtonBinding(diagnosis: LogiButtonCaptureDiagnosis) -> RecordedEvent {
+        guard diagnosis.usesNativeEvents else { return self }
+        return standardMouseAliasTriggerIfAvailable() ?? self
+    }
+
     // MARK: - 匹配方法
     /// 检查是否与给定的 CGEvent 匹配
     func matches(_ event: CGEvent) -> Bool {
@@ -302,6 +311,30 @@ struct ButtonBinding: Codable, Equatable {
         self.createdAt = createdAt
     }
 
+    func standardMouseAliasBindingIfAvailable() -> ButtonBinding? {
+        return LogiStandardMouseButtonAlias.convertedBinding(from: self)
+    }
+
+    func replacingTriggerEvent(_ triggerEvent: RecordedEvent) -> ButtonBinding {
+        if let payload = openTarget {
+            return ButtonBinding(
+                id: id,
+                triggerEvent: triggerEvent,
+                openTarget: payload,
+                isEnabled: isEnabled,
+                createdAt: createdAt
+            )
+        }
+
+        return ButtonBinding(
+            id: id,
+            triggerEvent: triggerEvent,
+            systemShortcutName: systemShortcutName,
+            isEnabled: isEnabled,
+            createdAt: createdAt
+        )
+    }
+
     // MARK: - Decode-time 一致性校验 (UI 与 executor 必须看到同一个真相)
     //
     // 不变量: systemShortcutName == openTargetSentinel ⇔ openTarget != nil
@@ -382,6 +415,23 @@ struct ButtonBinding: Codable, Equatable {
                lhs.isEnabled == rhs.isEnabled &&
                lhs.createdAt == rhs.createdAt &&
                lhs.openTarget == rhs.openTarget
+    }
+}
+
+enum ButtonBindingReplacement {
+    static func replacing(_ replacement: ButtonBinding, in bindings: [ButtonBinding]) -> [ButtonBinding] {
+        guard bindings.contains(where: { $0.id == replacement.id }) else {
+            return bindings
+        }
+
+        var result = bindings.filter { binding in
+            binding.id == replacement.id || binding.triggerEvent != replacement.triggerEvent
+        }
+        guard let index = result.firstIndex(where: { $0.id == replacement.id }) else {
+            return bindings
+        }
+        result[index] = replacement
+        return result
     }
 }
 

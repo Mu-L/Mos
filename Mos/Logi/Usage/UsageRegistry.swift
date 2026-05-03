@@ -27,10 +27,21 @@ final class UsageRegistry {
     func setUsage(source: UsageSource, codes: Set<UInt16>) {
         #if DEBUG
         precondition(Thread.isMainThread, "UsageRegistry is main-thread-only")
+        LogiTrace.log("[Usage] setUsage requested source=\(source) codes=\(LogiTrace.codes(codes))")
         #endif
         let existing = sources[source]
-        if existing == codes { return }
-        if existing == nil && codes.isEmpty { return }
+        if existing == codes {
+            #if DEBUG
+            LogiTrace.log("[Usage] setUsage ignored unchanged source=\(source)")
+            #endif
+            return
+        }
+        if existing == nil && codes.isEmpty {
+            #if DEBUG
+            LogiTrace.log("[Usage] setUsage ignored empty new source=\(source)")
+            #endif
+            return
+        }
         if codes.isEmpty {
             sources.removeValue(forKey: source)
         } else {
@@ -61,6 +72,9 @@ final class UsageRegistry {
             aggregatedCache = sources.values.reduce(into: Set<UInt16>()) { $0.formUnion($1) }
             aggregatedDirty = false
         }
+        #if DEBUG
+        LogiTrace.log("[Usage] recompute aggregate=\(LogiTrace.codes(aggregatedCache)) sources=\(sources.count) sessions=\(sessionProvider().count)")
+        #endif
         for session in sessionProvider() where session.isHIDPPCandidate {
             session.applyUsage(aggregatedCache)
         }
@@ -73,6 +87,9 @@ final class UsageRegistry {
             aggregatedCache = sources.values.reduce(into: Set<UInt16>()) { $0.formUnion($1) }
             aggregatedDirty = false
         }
+        #if DEBUG
+        LogiTrace.log("[Usage] primeSession device=\(session.deviceInfo.name) aggregate=\(LogiTrace.codes(aggregatedCache))")
+        #endif
         session.applyUsage(aggregatedCache)
     }
 }

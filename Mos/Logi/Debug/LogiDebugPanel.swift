@@ -31,6 +31,55 @@ struct LogEntry {
     var isExpanded: Bool = false
 }
 
+#if DEBUG
+enum LogiTrace {
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "LogiVerboseTraceEnabled")
+    }
+
+    static func log(
+        _ message: @autoclosure () -> String,
+        device: String = "Trace",
+        type: LogEntryType = .buttonEvent
+    ) {
+        guard isEnabled else { return }
+        LogiDebugPanel.log(device: device, type: type, message: "[Trace] \(message())")
+    }
+
+    static func event(_ event: InputEvent) -> String {
+        let source: String
+        switch event.source {
+        case .hidPP:
+            source = "hidPP"
+        case .cgEvent(let cgEvent):
+            source = "cgEvent(\(cgEvent.eventTypeName), nativeButton=\(cgEvent.mouseCode))"
+        }
+        return "source=\(source) type=\(event.type) code=\(event.code) phase=\(event.phase) modifiers=\(String(format: "0x%llX", event.modifiers.rawValue)) display=\(event.displayComponents.joined(separator: "+")) device=\(event.device?.name ?? "nil")"
+    }
+
+    static func recordedEvent(_ event: RecordedEvent) -> String {
+        "type=\(event.type) code=\(event.code) modifiers=\(String(format: "0x%llX", UInt64(event.modifiers))) display=\(event.displayComponents.joined(separator: "+")) deviceFilter=\(String(describing: event.deviceFilter))"
+    }
+
+    static func codes(_ codes: Set<UInt16>) -> String {
+        guard !codes.isEmpty else { return "[]" }
+        return "[" + codes.sorted().map { code in
+            if LogiCIDDirectory.isLogitechCode(code) {
+                return "\(code)(\(LogiCIDDirectory.name(forMosCode: code)))"
+            }
+            return "\(code)(\(KeyCode.mouseMap[code] ?? "Mouse(\(code))"))"
+        }.joined(separator: ",") + "]"
+    }
+
+    static func cids(_ cids: Set<UInt16>) -> String {
+        guard !cids.isEmpty else { return "[]" }
+        return "[" + cids.sorted().map { cid in
+            "\(String(format: "0x%04X", cid))(\(LogiCIDDirectory.name(forCID: cid)))"
+        }.joined(separator: ",") + "]"
+    }
+}
+#endif
+
 // MARK: - HID++ Protocol Dictionaries
 
 struct HIDPPInfo {
@@ -279,6 +328,36 @@ class LogiDebugPanel: NSObject {
 
     // MARK: - Logging API
 
+    #if DEBUG
+    private static let autoLogQueue = DispatchQueue(label: "me.caldis.Mos.LogiDebugPanel.autoLog")
+    private static let autoLogLatestFileName = "hidpp-debug-latest.log"
+    private static var autoLogInitialized = false
+    private static var autoLogSessionURL: URL?
+    private static var autoLogDirectoryOverride: URL?
+
+    internal static var currentAutoLogURLForTests: URL? {
+        autoLogQueue.sync { autoLogSessionURL }
+    }
+
+    internal class func setTestingAutoLogDirectory(_ directory: URL) {
+        autoLogQueue.sync {
+            autoLogDirectoryOverride = directory
+            resetAutoLogStateLocked()
+        }
+    }
+
+    internal class func resetAutoLogForTests() {
+        autoLogQueue.sync {
+            autoLogDirectoryOverride = nil
+            resetAutoLogStateLocked()
+        }
+    }
+
+    internal class func flushAutoLogForTests() {
+        autoLogQueue.sync {}
+    }
+    #endif
+
     class func log(_ message: String) {
         let entry = LogEntry(timestamp: timestamp(), deviceName: "", type: .info, message: message, decoded: nil, rawBytes: nil)
         appendToBuffer(entry)
@@ -295,14 +374,114 @@ class LogiDebugPanel: NSObject {
     private class func appendToBuffer(_ entry: LogEntry) {
         logBuffer.append(entry)
         if logBuffer.count > maxLogLines { logBuffer.removeFirst(logBuffer.count - maxLogLines) }
+        #if DEBUG
+        appendToAutoLog(entry)
+        #endif
         NotificationCenter.default.post(name: logNotification, object: entry)
     }
+
+    #if DEBUG
+    private class func appendToAutoLog(_ entry: LogEntry) {
+        autoLogQueue.async {
+            do {
+                try ensureAutoLogInitializedLocked()
+                let line = formatAutoLogEntry(entry)
+                let directory = autoLogDirectoryLocked()
+                let latestURL = directory.appendingPathComponent(autoLogLatestFileName)
+                try append(line, to: latestURL)
+                if let sessionURL = autoLogSessionURL {
+                    try append(line, to: sessionURL)
+                }
+            } catch {
+                NSLog("LogiDebugPanel: failed to write auto log: \(error)")
+            }
+        }
+    }
+
+    private class func ensureAutoLogInitializedLocked() throws {
+        guard !autoLogInitialized else { return }
+
+        let directory = autoLogDirectoryLocked()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let sessionURL = directory.appendingPathComponent("hidpp-debug-\(fileTimestamp()).log")
+        autoLogSessionURL = sessionURL
+
+        let header = autoLogHeader()
+        try header.write(to: directory.appendingPathComponent(autoLogLatestFileName), atomically: true, encoding: .utf8)
+        try header.write(to: sessionURL, atomically: true, encoding: .utf8)
+
+        autoLogInitialized = true
+    }
+
+    private class func resetAutoLogStateLocked() {
+        autoLogInitialized = false
+        autoLogSessionURL = nil
+    }
+
+    private class func autoLogDirectoryLocked() -> URL {
+        if let override = autoLogDirectoryOverride {
+            return override
+        }
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library", isDirectory: true)
+        return library
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("Mos", isDirectory: true)
+    }
+
+    private class func autoLogHeader() -> String {
+        return [
+            "# Mos HID++ debug log",
+            "# Session started: \(fullTimestamp())",
+            "# Latest file: \(autoLogLatestFileName)",
+            "",
+        ].joined(separator: "\n")
+    }
+
+    private class func formatAutoLogEntry(_ entry: LogEntry) -> String {
+        let device = entry.deviceName.isEmpty ? "" : "[\(entry.deviceName)] "
+        var output = "[\(entry.timestamp)] \(device)[\(entry.type.rawValue)] \(entry.message)\n"
+        if let decoded = entry.decoded {
+            output += "  > \(decoded)\n"
+        }
+        if let rawBytes = entry.rawBytes {
+            output += "  HEX: \(rawBytes.map { String(format: "%02X", $0) }.joined(separator: " "))\n"
+        }
+        return output
+    }
+
+    private class func append(_ text: String, to url: URL) throws {
+        let data = Data(text.utf8)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    }
+    #endif
 
     private static func timestamp() -> String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         return f.string(from: Date())
     }
+
+    #if DEBUG
+    private static func fullTimestamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS ZZZZZ"
+        return f.string(from: Date())
+    }
+
+    private static func fileTimestamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return f.string(from: Date())
+    }
+    #endif
 
     // MARK: - Show / Hide
 
@@ -2166,9 +2345,6 @@ extension LogiDebugPanel: NSTableViewDelegate {
             case .mosOwned:
                 label.stringValue = "DVRT"
                 label.textColor = NSColor(calibratedRed: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
-            case .coDivert:
-                label.stringValue = "DVRT\u{26A0}"
-                label.textColor = NSColor(calibratedRed: 1.0, green: 0.5, blue: 0.3, alpha: 0.95)
             case .clear:
                 label.stringValue = "\u{25CF}"
                 label.textColor = NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.4, alpha: 1.0)

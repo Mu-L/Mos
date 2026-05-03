@@ -65,6 +65,56 @@ final class InputProcessorTests: XCTestCase {
         XCTAssertEqual(result, .consumed)
     }
 
+    func testProcess_logiStandardButtonEventDoesNotMatchNativeMouseBinding() {
+        let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
+        let binding = ButtonBinding(triggerEvent: trigger, systemShortcutName: "custom::56:0", isEnabled: true)
+        Options.shared.buttons.binding = [binding]
+        ButtonUtils.shared.invalidateCache()
+
+        let event = InputEvent(
+            type: .mouse,
+            code: 1006,
+            modifiers: CGEventFlags(rawValue: 0),
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        XCTAssertEqual(InputProcessor.shared.process(event), .passthrough)
+    }
+
+    func testProcess_nativeMouseButtonMatchesNativeMouseBinding() {
+        let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
+        let binding = ButtonBinding(triggerEvent: trigger, systemShortcutName: "mouseLeftClick", isEnabled: true)
+        Options.shared.buttons.binding = [binding]
+        ButtonUtils.shared.invalidateCache()
+
+        var observedTypes: [CGEventType] = []
+        ShortcutExecutor.shared.setTestingMouseEventObserver { event in
+            observedTypes.append(event.type)
+        }
+
+        let downEvent = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .otherMouseDown,
+            mouseCursorPosition: CGPoint(x: 40, y: 40),
+            mouseButton: .center
+        )!
+        downEvent.setIntegerValueField(.mouseEventButtonNumber, value: 3)
+
+        let upEvent = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .otherMouseUp,
+            mouseCursorPosition: CGPoint(x: 40, y: 40),
+            mouseButton: .center
+        )!
+        upEvent.setIntegerValueField(.mouseEventButtonNumber, value: 3)
+
+        XCTAssertEqual(InputProcessor.shared.process(InputEvent(fromCGEvent: downEvent)), .consumed)
+        XCTAssertEqual(InputProcessor.shared.process(InputEvent(fromCGEvent: upEvent)), .consumed)
+        XCTAssertEqual(observedTypes, [.leftMouseDown, .leftMouseUp])
+    }
+
     func testProcess_upEvent_passthroughWithoutPriorDown() {
         let event = InputEvent(type: .mouse, code: 99, modifiers: CGEventFlags(rawValue: 0),
                                phase: .up, source: .hidPP, device: nil)
@@ -854,6 +904,7 @@ final class InputProcessorTests: XCTestCase {
             mouseCursorPosition: CGPoint(x: 16, y: 24),
             mouseButton: .left
         )!
+        event.flags = CGEventFlags(rawValue: 0)
 
         let proxy = CGEventTapProxy(bitPattern: 1)!
         let output = ButtonCore.shared.primaryMouseObservationCallBack(proxy, .leftMouseDown, event, nil)
@@ -1044,4 +1095,5 @@ final class InputProcessorTests: XCTestCase {
         XCTAssertFalse(contains(.keyDown, in: core.primaryObservationEventMask))
         XCTAssertFalse(contains(.keyUp, in: core.primaryObservationEventMask))
     }
+
 }

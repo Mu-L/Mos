@@ -29,6 +29,7 @@ internal class LogiSessionManager {
     private var hidManager: IOHIDManager?
     private var sessions: [IOHIDDevice: LogiDeviceSession] = [:]
     private(set) var isActive = false
+    private let deliveryModes = LogiButtonDeliveryModeStore()
 
     // MARK: - Lifecycle
 
@@ -124,6 +125,7 @@ internal class LogiSessionManager {
     private func deviceDisconnected(_ device: IOHIDDevice) {
         guard let session = sessions.removeValue(forKey: device) else { return }
         LogiDebugPanel.log("[LogitechHID] Device disconnected: \(session.deviceInfo.name)")
+        deliveryModes.removeModes(forDeviceNamed: session.deviceInfo.name, productId: session.deviceInfo.productId)
         session.teardown()
         NotificationCenter.default.post(name: Self.sessionChangedNotification, object: nil)
         // 断开的 session 可能曾处于 busy 状态, 重新聚合一次防止 spinner 卡住.
@@ -203,8 +205,16 @@ internal class LogiSessionManager {
     /// 异步处理, 完成后通过 `reportingQueryDidCompleteNotification` 刷新 indicator.
     func refreshReportingStates() {
         if let last = lastReportingRefresh,
-           Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval { return }
+           Date().timeIntervalSince(last) < Self.reportingRefreshMinInterval {
+            #if DEBUG
+            LogiTrace.log("[Manager] refreshReportingStates throttled")
+            #endif
+            return
+        }
         lastReportingRefresh = Date()
+        #if DEBUG
+        LogiTrace.log("[Manager] refreshReportingStates sessions=\(sessions.count)")
+        #endif
         for session in sessions.values where session.isHIDPPCandidate {
             session.refreshReportingState()
         }
@@ -213,20 +223,133 @@ internal class LogiSessionManager {
     /// 查询某 Logi MosCode 当前是否被第三方 (如 Logitech Options+) 接管.
     /// 未连接设备 / 未完成 reporting 查询 / 非 Logi code -> unknown.
     func conflictStatus(forMosCode mosCode: UInt16) -> ConflictStatus {
-        guard let cid = LogiCIDDirectory.toCID(mosCode) else { return .unknown }
-        for session in sessions.values where session.isHIDPPCandidate {
+        return buttonCaptureDiagnosis(forMosCode: mosCode).ownership
+    }
+
+    func buttonCaptureDiagnosis(forMosCode mosCode: UInt16) -> LogiButtonCaptureDiagnosis {
+        guard let cid = LogiCIDDirectory.toCID(mosCode) else {
+            return .unknown(nativeMouseButton: nil)
+        }
+        let nativeMouseButton = LogiCIDDirectory.nativeMouseButton(forCID: cid)
+        var diagnoses: [LogiButtonCaptureDiagnosis] = []
+
+        for session in sessions.values.sorted(by: Self.prefersDiagnosisSession) where session.isHIDPPCandidate {
             if let control = session.control(forCID: cid) {
                 let mosOwns = session.debugDivertedCIDs.contains(cid)
-                return LogiConflictDetector.status(
+                let ownership = LogiConflictDetector.status(
                     reportingFlags: control.reportingFlags,
                     targetCID: control.targetCID,
                     cid: cid,
                     reportingQueried: control.reportingQueried,
                     mosOwnsDivert: mosOwns
                 )
+                let key = session.ownershipKey(forCID: cid)
+                let delivery = deliveryModes.mode(for: key)
+                let usesNativeEvents = !LogiButtonDeliveryPolicy.default.shouldUseHIDPPDelivery(
+                    transport: key.transport,
+                    cid: cid,
+                    phase: .normal
+                )
+                let diagnosis = LogiButtonCaptureDiagnosis(
+                    ownership: ownership,
+                    delivery: delivery,
+                    ownershipKey: key,
+                    nativeMouseButton: nativeMouseButton,
+                    usesNativeEvents: usesNativeEvents
+                )
+                diagnoses.append(diagnosis)
             }
         }
-        return .unknown
+        return diagnoses.first ?? .unknown(nativeMouseButton: nativeMouseButton)
+    }
+
+    private static func prefersDiagnosisSession(_ lhs: LogiDeviceSession, _ rhs: LogiDeviceSession) -> Bool {
+        return diagnosisSessionRank(lhs) < diagnosisSessionRank(rhs)
+    }
+
+    private static func diagnosisSessionRank(_ session: LogiDeviceSession) -> Int {
+        return diagnosisSessionRank(
+            transport: LogiTransportIdentity(session.connectionMode),
+            receiverTargetConnected: session.debugCurrentReceiverTargetIsConnected
+        )
+    }
+
+    private static func diagnosisSessionRank(
+        transport: LogiTransportIdentity,
+        receiverTargetConnected: Bool
+    ) -> Int {
+        switch transport {
+        case .receiver:
+            return receiverTargetConnected ? 0 : 3
+        case .bleDirect:
+            return 1
+        case .unsupported:
+            return 4
+        }
+    }
+
+    #if DEBUG
+    internal static func diagnosisSessionRankForTests(
+        transport: LogiTransportIdentity,
+        receiverTargetConnected: Bool
+    ) -> Int {
+        return diagnosisSessionRank(
+            transport: transport,
+            receiverTargetConnected: receiverTargetConnected
+        )
+    }
+    #endif
+
+    func deliveryMode(forMosCode mosCode: UInt16) -> LogiButtonDeliveryMode? {
+        return deliveryModes.deliveryMode(forMosCode: mosCode, matching: activeOwnershipKeys)
+    }
+
+    func notifyConflictChanged() {
+        NotificationCenter.default.post(name: Self.conflictChangedNotification, object: nil)
+    }
+
+    private var activeOwnershipKeys: [LogiOwnershipKey] {
+        return sessions.values.flatMap { $0.ownershipKeysForKnownControls() }
+    }
+
+    func deliveryMode(for key: LogiOwnershipKey) -> LogiButtonDeliveryMode {
+        return deliveryModes.mode(for: key)
+    }
+
+    @discardableResult
+    func recordExternalClear(for key: LogiOwnershipKey, at now: Date = Date()) -> LogiButtonDeliveryMode {
+        let previousMode = deliveryModes.mode(for: key)
+        let mode = deliveryModes.recordExternalClear(for: key, at: now)
+        #if DEBUG
+        LogiTrace.log("[Manager] recordExternalClear key=\(key.name) cid=\(String(format: "0x%04X", key.cid)) transport=\(key.transport) previous=\(previousMode.debugLabel) current=\(mode.debugLabel)")
+        #endif
+        if mode != previousMode {
+            LogiDebugPanel.log(
+                device: key.name,
+                type: .buttonEvent,
+                message: "[DeliveryMode] changed cid=\(String(format: "0x%04X", key.cid)) mosCode=\(LogiCIDDirectory.toMosCode(key.cid)) transport=\(key.transport) previous=\(previousMode.debugLabel) current=\(mode.debugLabel)"
+            )
+            if mode == .contended {
+                showDeliveryContentionToast(for: key)
+            }
+        }
+        if mode != .hidpp {
+            notifyConflictChanged()
+        }
+        return mode
+    }
+
+    private func showDeliveryContentionToast(for key: LogiOwnershipKey) {
+        let messageKey: String
+        if key.transport == .bleDirect,
+           LogiCIDDirectory.nativeMouseButton(forCID: key.cid) != nil {
+            messageKey = "logi_ble_contention_standard_mouse_alias_toast"
+        } else {
+            messageKey = "logi_hidpp_contention_toast"
+        }
+        let controlName = LogiCIDDirectory.name(forCID: key.cid)
+        let message = String(format: NSLocalizedString(messageKey, comment: ""), controlName)
+        LogiCenter.shared.externalBridge.showLogiToast(message, severity: .warning)
     }
 
     // MARK: - Divert Control
@@ -237,6 +360,9 @@ internal class LogiSessionManager {
     /// 录制模式: 临时 divert 所有按键
     func temporarilyDivertAll() {
         isRecording = true
+        #if DEBUG
+        LogiTrace.log("[Manager] beginRecording sessions=\(sessions.count) candidates=\(sessions.values.filter { $0.isHIDPPCandidate }.count)")
+        #endif
         for (_, session) in sessions where session.isHIDPPCandidate {
             session.temporarilyDivertAll()
         }
@@ -245,6 +371,9 @@ internal class LogiSessionManager {
     /// 录制结束: 恢复到只 divert 有绑定的按键
     func restoreDivertToBindings() {
         isRecording = false
+        #if DEBUG
+        LogiTrace.log("[Manager] endRecording sessions=\(sessions.count) candidates=\(sessions.values.filter { $0.isHIDPPCandidate }.count)")
+        #endif
         for (_, session) in sessions where session.isHIDPPCandidate {
             session.restoreDivertToBindings()
         }

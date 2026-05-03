@@ -346,6 +346,20 @@ struct LogiCIDDirectory {
         0x00D7: 1002,  // Virtual Gesture Button
     ]
 
+    /// HID++ controls that also surface as stable macOS mouse button numbers.
+    /// These can fall back to the CGEvent path when BLE divert ownership is contested.
+    private static let cidToNativeMouseButton: [UInt16: UInt16] = [
+        0x0052: 2,  // Middle Button
+        0x0053: 3,  // Back Button
+        0x0056: 4,  // Forward Button
+    ]
+
+    private static let nativeMouseButtonToCID: [UInt16: UInt16] = {
+        var reversed: [UInt16: UInt16] = [:]
+        for (cid, button) in cidToNativeMouseButton { reversed[button] = cid }
+        return reversed
+    }()
+
     // MARK: - 反向映射缓存 (预计算)
 
     private static let codeToCID: [UInt16: UInt16] = {
@@ -382,6 +396,22 @@ struct LogiCIDDirectory {
         if let cid = codeToCID[mosCode] { return cid }
         if mosCode >= 2000 { return mosCode - 2000 }
         return nil
+    }
+
+    /// Native macOS mouse button number for a HID++ CID, if Mos can safely alias it.
+    static func nativeMouseButton(forCID cid: UInt16) -> UInt16? {
+        return cidToNativeMouseButton[cid]
+    }
+
+    /// Native macOS mouse button number for a Logi MosCode, if Mos can safely alias it.
+    static func nativeMouseButton(forMosCode mosCode: UInt16) -> UInt16? {
+        guard let cid = toCID(mosCode) else { return nil }
+        return nativeMouseButton(forCID: cid)
+    }
+
+    /// HID++ CID for a native macOS mouse button number, when Mos knows a stable alias.
+    static func cid(forNativeMouseButton button: UInt16) -> UInt16? {
+        return nativeMouseButtonToCID[button]
     }
 
     /// 判断按钮码是否属于 Logitech HID++ 专有范围

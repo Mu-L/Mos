@@ -64,6 +64,32 @@ class LogiDeviceSession {
 
     private(set) var connectionMode: ConnectionMode = .unsupported
 
+    enum ReceiverReconnectAction: Equatable {
+        case ignore
+        case refreshReporting
+        case rediscoverFeatures
+    }
+
+    enum ReceiverConnectionNotificationAction: Equatable {
+        case ignore
+        case currentTargetConnected
+        case currentTargetDisconnected
+        case retarget(UInt8)
+
+        var debugLabel: String {
+            switch self {
+            case .ignore:
+                return "ignore"
+            case .currentTargetConnected:
+                return "currentTargetConnected"
+            case .currentTargetDisconnected:
+                return "currentTargetDisconnected"
+            case .retarget(let slot):
+                return "retarget(\(slot))"
+            }
+        }
+    }
+
     // MARK: - HID++ State
     private var featureIndex: [UInt16: UInt8] = [:]
     private var divertedCIDs: Set<UInt16> = []
@@ -91,6 +117,8 @@ class LogiDeviceSession {
     private var controlInfoQueryTimer: Timer?
     private var reportingQueryTimer: Timer?
     private static let reprogQueryTimeout: TimeInterval = 1.0
+    private static let bleControlInfoRetryLimit = 1
+    private var controlInfoRetryCounts: [Int: Int] = [:]
 
     // MARK: - Reprog Controls State
     private var reprogControlCount: Int = 0
@@ -117,6 +145,18 @@ class LogiDeviceSession {
         var reportingFlags: UInt8 = 0   // bit0=tmpDivert, bit1=persistDivert, bit2=tmpRemap, bit3=persistRemap
         var targetCID: UInt16 = 0       // remap 目标 CID (0 = 自映射)
         var reportingQueried: Bool = false
+    }
+
+    struct QueriedControlState {
+        let cid: UInt16
+        let reportingFlags: UInt8
+        let reportingQueried: Bool
+    }
+
+    enum ReprogInitFunction0Route: Equatable {
+        case divertedButtonEvent
+        case getControlCountResponse
+        case ignored
     }
 
     // MARK: - Receiver Paired Device Info
@@ -194,6 +234,36 @@ class LogiDeviceSession {
     private static let pairingInfoDeviceInfo: UInt8 = 0x20
     private static let pairingInfoDeviceName: UInt8 = 0x40
 
+    private struct ReportingResponse {
+        let cid: UInt16
+        let reportingFlags: UInt8
+        let targetCID: UInt16
+    }
+
+    private struct SetControlReportingAck {
+        let cid: UInt16
+        let flagsByte: UInt8
+        let targetCID: UInt16
+
+        var updatesTemporaryDivert: Bool { (flagsByte & 0x02) != 0 }
+        var temporaryDivertEnabled: Bool { (flagsByte & 0x01) != 0 }
+    }
+
+    private struct PendingSetControlReportingAck {
+        let flagsByte: UInt8
+        let targetCID: UInt16
+        let expiresAt: Date
+    }
+
+    private struct PendingControlReportingQuery {
+        let sentAt: Date
+        let expiresAt: Date
+    }
+
+    private static let pendingSetControlReportingAckTTL: TimeInterval = 2.0
+    private static let controlReportingQueryTTL: TimeInterval = 2.0
+    private static let divertReassertionDelay: TimeInterval = 0.05
+
     // MARK: - Init
 
     init(hidDevice: IOHIDDevice) {
@@ -226,6 +296,19 @@ class LogiDeviceSession {
     /// CID set last passed to setControlReporting. Diffed against next applyUsage's
     /// projection so we only emit setControlReporting for state changes.
     internal var lastApplied: Set<UInt16> = []
+    private var pendingSetControlReportingAcks: [UInt16: PendingSetControlReportingAck] = [:]
+    private var divertReassertionWorkItem: DispatchWorkItem?
+    private let bleStandardButtonUndivertPlanner = LogiBLEStandardButtonUndivertPlanner()
+    private var bleStandardUndivertGuardWorkItem: DispatchWorkItem?
+    private var bleStandardUndivertGuardGeneration = 0
+    private var bleStandardUndivertGuardTargets: Set<UInt16> = []
+    private var pendingBLEUndivertGuardQueries: [UInt16: PendingControlReportingQuery] = [:]
+
+    struct RecordingDivertPlan: Equatable {
+        let desired: Set<UInt16>
+        let toDivert: Set<UInt16>
+        let toUndivert: Set<UInt16>
+    }
 
     private func primeFromRegistry() {
         LogiCenter.shared.registry.primeSession(self)
@@ -234,21 +317,71 @@ class LogiDeviceSession {
     internal func applyUsage(_ aggregateMosCodes: Set<UInt16>) {
         #if DEBUG
         precondition(Thread.isMainThread, "applyUsage main-thread-only")
+        LogiTrace.log(
+            "[Session] applyUsage enter device=\(deviceInfo.name) mode=\(connectionMode) connected=\(currentReceiverTargetIsConnected) reprogInit=\(reprogInitComplete) aggregate=\(LogiTrace.codes(aggregateMosCodes)) lastApplied=\(LogiTrace.cids(lastApplied)) diverted=\(LogiTrace.cids(divertedCIDs))",
+            device: deviceInfo.name
+        )
         #endif
         // Mid-discovery guard: isHIDPPCandidate is a static vendor/product check and is true
         // throughout discovery. If a setUsage fires before divertBoundControls runs, applyUsage
         // would diff against partial discoveredControls. The post-discovery prime catches up.
-        guard reprogInitComplete else { return }
-        guard let reprogIdx = featureIndex[Self.featureReprogV4] else { return }
+        guard reprogInitComplete else {
+            #if DEBUG
+            LogiTrace.log("[Session] applyUsage skipped: reprogInitComplete=false", device: deviceInfo.name)
+            #endif
+            return
+        }
+        guard let reprogIdx = featureIndex[Self.featureReprogV4] else {
+            #if DEBUG
+            LogiTrace.log("[Session] applyUsage skipped: REPROG feature missing", device: deviceInfo.name)
+            #endif
+            return
+        }
+        guard currentReceiverTargetIsConnected else {
+            #if DEBUG
+            LogiTrace.log("[Session] applyUsage skipped: receiver target disconnected", device: deviceInfo.name)
+            #endif
+            return
+        }
         // Project MosCodes -> CIDs, drop unmapped, intersect with divertable CIDs.
         let divertable = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
-        let targetCIDs: Set<UInt16> = aggregateMosCodes.reduce(into: Set<UInt16>()) { acc, code in
-            if let cid = LogiCIDDirectory.toCID(code), divertable.contains(cid) {
-                acc.insert(cid)
-            }
+        let policy = LogiButtonDeliveryPolicy.default
+        let transport = LogiTransportIdentity(connectionMode)
+        #if DEBUG
+        let projection = aggregateMosCodes.sorted().map { code -> String in
+            let cid = LogiCIDDirectory.toCID(code) ?? LogiCIDDirectory.cid(forNativeMouseButton: code)
+            let cidLabel = cid.map { String(format: "0x%04X", $0) } ?? "nil"
+            let mode = cid.map { LogiSessionManager.shared.deliveryMode(for: self.ownershipKey(forCID: $0)).debugLabel } ?? "none"
+            let route = cid.map { policy.shouldUseHIDPPDelivery(transport: transport, cid: $0, phase: .normal) ? "hidpp" : "native" } ?? "none"
+            let isDivertable = cid.map { divertable.contains($0) } ?? false
+            return "\(code)->\(cidLabel) divertable=\(isDivertable) deliveryMode=\(mode) route=\(route)"
+        }.joined(separator: " | ")
+        LogiTrace.log("[Session] applyUsage projection \(projection)", device: deviceInfo.name)
+        #endif
+        let targetCIDs = Self.targetCIDsForUsage(
+            aggregateMosCodes: aggregateMosCodes,
+            divertableCIDs: divertable,
+            transport: transport,
+            phase: .normal,
+            policy: policy
+        ) { cid in
+            LogiSessionManager.shared.deliveryMode(for: self.ownershipKey(forCID: cid))
         }
+        let nativeFirstCIDs = Self.nativeFirstCIDsForUsage(
+            aggregateMosCodes: aggregateMosCodes,
+            divertableCIDs: divertable,
+            transport: transport,
+            phase: .normal,
+            policy: policy
+        )
         let toDivert = targetCIDs.subtracting(self.lastApplied)
-        let toUndivert = self.lastApplied.subtracting(targetCIDs)
+        let toUndivert = self.lastApplied.subtracting(targetCIDs).union(nativeFirstCIDs)
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] applyUsage target=\(LogiTrace.cids(targetCIDs)) nativeFirst=\(LogiTrace.cids(nativeFirstCIDs)) toDivert=\(LogiTrace.cids(toDivert)) toUndivert=\(LogiTrace.cids(toUndivert))",
+            device: deviceInfo.name
+        )
+        #endif
         releaseActiveButtonState(for: toUndivert, reason: "usage removed")
         for cid in toDivert {
             setControlReporting(featureIndex: reprogIdx, cid: cid, divert: true)
@@ -257,12 +390,318 @@ class LogiDeviceSession {
             setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
         }
         self.lastApplied = targetCIDs
+        scheduleBLEStandardUndivertGuard(for: nativeFirstCIDs)
     }
+
+    private static func targetCIDsForUsage(
+        aggregateMosCodes: Set<UInt16>,
+        divertableCIDs: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        phase: LogiButtonDeliveryPhase,
+        policy: LogiButtonDeliveryPolicy,
+        deliveryModeForCID: (UInt16) -> LogiButtonDeliveryMode
+    ) -> Set<UInt16> {
+        return aggregateMosCodes.reduce(into: Set<UInt16>()) { acc, code in
+            guard let cid = LogiCIDDirectory.toCID(code),
+                  divertableCIDs.contains(cid),
+                  shouldUseHIDPPDelivery(mode: deliveryModeForCID(cid)),
+                  policy.shouldUseHIDPPDelivery(transport: transport, cid: cid, phase: phase) else {
+                return
+            }
+            acc.insert(cid)
+        }
+    }
+
+    private static func nativeFirstCIDsForUsage(
+        aggregateMosCodes: Set<UInt16>,
+        divertableCIDs: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        phase: LogiButtonDeliveryPhase,
+        policy: LogiButtonDeliveryPolicy
+    ) -> Set<UInt16> {
+        return aggregateMosCodes.reduce(into: Set<UInt16>()) { acc, code in
+            guard let cid = LogiCIDDirectory.toCID(code) ?? LogiCIDDirectory.cid(forNativeMouseButton: code),
+                  divertableCIDs.contains(cid),
+                  !policy.shouldUseHIDPPDelivery(transport: transport, cid: cid, phase: phase) else {
+                return
+            }
+            acc.insert(cid)
+        }
+    }
+
+    private static func shouldUseHIDPPDelivery(mode: LogiButtonDeliveryMode) -> Bool {
+        switch mode {
+        case .hidpp:
+            return true
+        case .contended:
+            return false
+        }
+    }
+
+    private static func recordingDivertPlan(
+        divertableCIDs: Set<UInt16>,
+        lastApplied: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        policy: LogiButtonDeliveryPolicy
+    ) -> RecordingDivertPlan {
+        let desired = divertableCIDs.filter { cid in
+            policy.shouldUseHIDPPDelivery(
+                transport: transport,
+                cid: cid,
+                phase: .recording
+            )
+        }
+        let nativeFirst = divertableCIDs.filter { cid in
+            !policy.shouldUseHIDPPDelivery(
+                transport: transport,
+                cid: cid,
+                phase: .recording
+            )
+        }
+        return RecordingDivertPlan(
+            desired: desired,
+            toDivert: desired.subtracting(lastApplied),
+            toUndivert: lastApplied.subtracting(desired).union(nativeFirst)
+        )
+    }
+
+    private func scheduleBLEStandardUndivertGuard(for nativeFirstCIDs: Set<UInt16>) {
+        let policy = LogiButtonDeliveryPolicy.default
+        guard policy.standardButtonUndivertGuardEnabled else {
+            #if DEBUG
+            LogiTrace.log("[StandardButtonGuard] skipped: disabled by policy", device: deviceInfo.name)
+            #endif
+            cancelBLEStandardUndivertGuard()
+            return
+        }
+        guard connectionMode == .bleDirect,
+              currentReceiverTargetIsConnected else {
+            #if DEBUG
+            LogiTrace.log("[StandardButtonGuard] skipped mode=\(connectionMode) connected=\(currentReceiverTargetIsConnected)", device: deviceInfo.name)
+            #endif
+            cancelBLEStandardUndivertGuard()
+            return
+        }
+
+        let activeTargets = nativeFirstCIDs.filter { LogiCIDDirectory.nativeMouseButton(forCID: $0) != nil }
+        #if DEBUG
+        LogiTrace.log("[StandardButtonGuard] planning target=\(LogiTrace.cids(nativeFirstCIDs)) active=\(LogiTrace.cids(activeTargets)) existing=\(LogiTrace.cids(bleStandardUndivertGuardTargets)) interval=\(String(format: "%.2fs", policy.standardButtonUndivertGuardInterval))", device: deviceInfo.name)
+        #endif
+        guard activeTargets != bleStandardUndivertGuardTargets else { return }
+
+        cancelBLEStandardUndivertGuard()
+        guard !activeTargets.isEmpty else { return }
+
+        bleStandardUndivertGuardTargets = activeTargets
+        #if DEBUG
+        let targets = activeTargets
+            .sorted()
+            .map { String(format: "0x%04X", $0) }
+            .joined(separator: ", ")
+        LogiDebugPanel.log("[\(deviceInfo.name)] BLE standard-button undivert guard active every \(String(format: "%.1f", policy.standardButtonUndivertGuardInterval))s for CIDs: \(targets)")
+        #endif
+        scheduleBLEUndivertGuardTick(
+            expectedTargets: activeTargets,
+            generation: bleStandardUndivertGuardGeneration,
+            interval: policy.standardButtonUndivertGuardInterval
+        )
+    }
+
+    private func scheduleBLEUndivertGuardTick(
+        expectedTargets: Set<UInt16>,
+        generation: Int,
+        interval: TimeInterval
+    ) {
+        bleStandardUndivertGuardWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.runBLEStandardUndivertGuard(
+                expectedTargets: expectedTargets,
+                generation: generation,
+                interval: interval
+            )
+        }
+        bleStandardUndivertGuardWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: item)
+    }
+
+    private func runBLEStandardUndivertGuard(
+        expectedTargets: Set<UInt16>,
+        generation: Int,
+        interval: TimeInterval
+    ) {
+        guard generation == bleStandardUndivertGuardGeneration,
+              connectionMode == .bleDirect,
+              currentReceiverTargetIsConnected else {
+            #if DEBUG
+            LogiTrace.log(
+                "[StandardButtonGuard] tick skipped generation=\(generation) currentGeneration=\(bleStandardUndivertGuardGeneration) mode=\(connectionMode) connected=\(currentReceiverTargetIsConnected)",
+                device: deviceInfo.name
+            )
+            #endif
+            return
+        }
+
+        let policy = LogiButtonDeliveryPolicy.default
+        guard policy.standardButtonUndivertGuardEnabled else {
+            cancelBLEStandardUndivertGuard()
+            return
+        }
+
+        let activeTargets = expectedTargets.filter { LogiCIDDirectory.nativeMouseButton(forCID: $0) != nil }
+        guard !activeTargets.isEmpty else {
+            cancelBLEStandardUndivertGuard()
+            return
+        }
+
+        bleStandardUndivertGuardTargets = activeTargets
+        sendBLEUndivertGuardReportingQueries(for: activeTargets)
+        scheduleBLEUndivertGuardTick(
+            expectedTargets: activeTargets,
+            generation: generation,
+            interval: interval
+        )
+    }
+
+    private func sendBLEUndivertGuardReportingQueries(for activeTargets: Set<UInt16>) {
+        guard reportingQueryTimer == nil else {
+            #if DEBUG
+            LogiTrace.log("[StandardButtonGuard] reporting query deferred: full reporting refresh in flight", device: deviceInfo.name)
+            #endif
+            return
+        }
+
+        expireStaleBLEUndivertGuardQueries()
+        let probes = bleStandardButtonUndivertPlanner.reportingQueryProbes(
+            activeTargets: activeTargets,
+            reprogFeatureIndex: featureIndex[Self.featureReprogV4]
+        )
+        guard !probes.isEmpty else {
+            #if DEBUG
+            LogiTrace.log("[StandardButtonGuard] reporting query skipped: REPROG feature unavailable", device: deviceInfo.name)
+            #endif
+            return
+        }
+
+        let now = Date()
+        let probesToSend = probes.filter { probe in
+            guard let pending = pendingBLEUndivertGuardQueries[probe.targetCID] else {
+                return true
+            }
+            return pending.expiresAt <= now
+        }
+        guard !probesToSend.isEmpty else { return }
+
+        #if DEBUG
+        let targets = probesToSend
+            .map { String(format: "0x%04X", $0.targetCID) }
+            .joined(separator: ", ")
+        LogiTrace.log("[StandardButtonGuard] query reporting targets=\(targets)", device: deviceInfo.name)
+        #endif
+
+        for probe in probesToSend {
+            pendingBLEUndivertGuardQueries[probe.targetCID] = PendingControlReportingQuery(
+                sentAt: now,
+                expiresAt: now.addingTimeInterval(Self.controlReportingQueryTTL)
+            )
+            sendRequest(
+                featureIndex: probe.featureIndex,
+                functionId: probe.functionId,
+                params: probe.params
+            )
+        }
+    }
+
+    private func expireStaleBLEUndivertGuardQueries(now: Date = Date()) {
+        pendingBLEUndivertGuardQueries = pendingBLEUndivertGuardQueries.filter { _, pending in
+            pending.expiresAt > now
+        }
+    }
+
+    #if DEBUG
+    internal static func targetCIDsForUsageForTests(
+        aggregateMosCodes: Set<UInt16>,
+        divertableCIDs: Set<UInt16>,
+        deliveryModeForCID: (UInt16) -> LogiButtonDeliveryMode
+    ) -> Set<UInt16> {
+        return targetCIDsForUsage(
+            aggregateMosCodes: aggregateMosCodes,
+            divertableCIDs: divertableCIDs,
+            transport: .receiver,
+            phase: .normal,
+            policy: LogiButtonDeliveryPolicy(
+                standardMouseButtonsUseNativeEvents: false
+            ),
+            deliveryModeForCID: deliveryModeForCID
+        )
+    }
+
+    internal static func targetCIDsForUsageForTests(
+        aggregateMosCodes: Set<UInt16>,
+        divertableCIDs: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        phase: LogiButtonDeliveryPhase,
+        policy: LogiButtonDeliveryPolicy,
+        deliveryModeForCID: (UInt16) -> LogiButtonDeliveryMode
+    ) -> Set<UInt16> {
+        return targetCIDsForUsage(
+            aggregateMosCodes: aggregateMosCodes,
+            divertableCIDs: divertableCIDs,
+            transport: transport,
+            phase: phase,
+            policy: policy,
+            deliveryModeForCID: deliveryModeForCID
+        )
+    }
+
+    internal static func nativeFirstCIDsForUsageForTests(
+        aggregateMosCodes: Set<UInt16>,
+        divertableCIDs: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        phase: LogiButtonDeliveryPhase,
+        policy: LogiButtonDeliveryPolicy
+    ) -> Set<UInt16> {
+        return nativeFirstCIDsForUsage(
+            aggregateMosCodes: aggregateMosCodes,
+            divertableCIDs: divertableCIDs,
+            transport: transport,
+            phase: phase,
+            policy: policy
+        )
+    }
+
+    internal static func recordingDivertPlanForTests(
+        divertableCIDs: Set<UInt16>,
+        lastApplied: Set<UInt16>,
+        transport: LogiTransportIdentity,
+        policy: LogiButtonDeliveryPolicy
+    ) -> RecordingDivertPlan {
+        return recordingDivertPlan(
+            divertableCIDs: divertableCIDs,
+            lastApplied: lastApplied,
+            transport: transport,
+            policy: policy
+        )
+    }
+    #endif
 
     // MARK: - Debug Accessors (for HID++ debug panel)
     var debugFeatureIndex: [UInt16: UInt8] { featureIndex }
     var debugDiscoveredControls: [ControlInfo] { discoveredControls }
     var debugDivertedCIDs: Set<UInt16> { divertedCIDs }
+
+    func ownershipKey(forCID cid: UInt16) -> LogiOwnershipKey {
+        return LogiOwnershipKey(
+            vendorId: deviceInfo.vendorId,
+            productId: deviceInfo.productId,
+            name: deviceInfo.name,
+            transport: LogiTransportIdentity(connectionMode),
+            cid: cid
+        )
+    }
+
+    func ownershipKeysForKnownControls() -> [LogiOwnershipKey] {
+        return discoveredControls.map { ownershipKey(forCID: $0.cid) }
+    }
 
     /// 查询指定 CID 的 ControlInfo (供冲突判定等外部查询使用).
     func control(forCID cid: UInt16) -> ControlInfo? {
@@ -272,6 +711,7 @@ class LogiDeviceSession {
     var debugHandshakeComplete: Bool { handshakeComplete }
     var debugDiscoveryInFlight: Bool { discoveryInFlight }
     var debugIsReceiver: Bool { connectionMode == .receiver }
+    var debugCurrentReceiverTargetIsConnected: Bool { currentReceiverTargetIsConnected }
     var debugDeviceIndex: UInt8 { deviceIndex }
     var debugIsBLE: Bool { isBLE }
     var debugDeviceOpened: Bool { deviceOpened }
@@ -283,6 +723,123 @@ class LogiDeviceSession {
         case .unsupported: return "Unsupported"
         }
     }
+
+    private var currentReceiverTargetIsConnected: Bool {
+        return Self.receiverTargetIsConnected(
+            connectionMode: connectionMode,
+            deviceIndex: deviceIndex,
+            pairedDevices: receiverPairedDevices
+        )
+    }
+
+    private var currentReceiverTargetConnectionIsKnown: Bool {
+        return Self.receiverTargetConnectionIsKnown(
+            connectionMode: connectionMode,
+            deviceIndex: deviceIndex,
+            pairedDevices: receiverPairedDevices
+        )
+    }
+
+    private static func receiverTargetConnectionIsKnown(
+        connectionMode: ConnectionMode,
+        deviceIndex: UInt8,
+        pairedDevices: [ReceiverPairedDevice]
+    ) -> Bool {
+        guard connectionMode == .receiver else { return true }
+        guard deviceIndex >= 1 && deviceIndex <= 6 else { return false }
+        return pairedDevices.contains(where: { $0.slot == deviceIndex })
+    }
+
+    private static func receiverTargetIsConnected(
+        connectionMode: ConnectionMode,
+        deviceIndex: UInt8,
+        pairedDevices: [ReceiverPairedDevice]
+    ) -> Bool {
+        guard connectionMode == .receiver else { return true }
+        guard deviceIndex >= 1 && deviceIndex <= 6 else { return false }
+        return pairedDevices.first(where: { $0.slot == deviceIndex })?.isConnected ?? true
+    }
+
+    private static func receiverReconnectAction(
+        hasReprogFeature: Bool,
+        discoveredControlCount: Int,
+        reprogControlCount: Int,
+        hasInflightWork: Bool
+    ) -> ReceiverReconnectAction {
+        if hasInflightWork { return .ignore }
+        if hasReprogFeature,
+           discoveredControlCount > 0,
+           discoveredControlCount == reprogControlCount {
+            return .refreshReporting
+        }
+        return .rediscoverFeatures
+    }
+
+    private static func receiverConnectionNotificationAction(
+        currentDeviceIndex: UInt8,
+        incomingDeviceIndex: UInt8,
+        connected: Bool,
+        currentTargetConnectionIsKnown: Bool,
+        currentTargetIsConnected: Bool,
+        reprogInitComplete: Bool,
+        hasInflightWork: Bool
+    ) -> ReceiverConnectionNotificationAction {
+        guard incomingDeviceIndex >= 1 && incomingDeviceIndex <= 6 else { return .ignore }
+        if incomingDeviceIndex == currentDeviceIndex {
+            return connected ? .currentTargetConnected : .currentTargetDisconnected
+        }
+        guard connected else { return .ignore }
+        let currentTargetReady = currentTargetConnectionIsKnown && currentTargetIsConnected && reprogInitComplete
+        guard !currentTargetReady && !hasInflightWork else { return .ignore }
+        return .retarget(incomingDeviceIndex)
+    }
+
+    #if DEBUG
+    internal static func receiverTargetIsConnectedForTests(
+        connectionMode: ConnectionMode,
+        deviceIndex: UInt8,
+        pairedDevices: [ReceiverPairedDevice]
+    ) -> Bool {
+        return receiverTargetIsConnected(
+            connectionMode: connectionMode,
+            deviceIndex: deviceIndex,
+            pairedDevices: pairedDevices
+        )
+    }
+
+    internal static func receiverReconnectActionForTests(
+        hasReprogFeature: Bool,
+        discoveredControlCount: Int,
+        reprogControlCount: Int,
+        hasInflightWork: Bool
+    ) -> ReceiverReconnectAction {
+        return receiverReconnectAction(
+            hasReprogFeature: hasReprogFeature,
+            discoveredControlCount: discoveredControlCount,
+            reprogControlCount: reprogControlCount,
+            hasInflightWork: hasInflightWork
+        )
+    }
+
+    internal static func receiverConnectionNotificationActionForTests(
+        currentDeviceIndex: UInt8,
+        incomingDeviceIndex: UInt8,
+        connected: Bool,
+        currentTargetIsConnected: Bool,
+        reprogInitComplete: Bool,
+        hasInflightWork: Bool
+    ) -> ReceiverConnectionNotificationAction {
+        return receiverConnectionNotificationAction(
+            currentDeviceIndex: currentDeviceIndex,
+            incomingDeviceIndex: incomingDeviceIndex,
+            connected: connected,
+            currentTargetConnectionIsKnown: true,
+            currentTargetIsConnected: currentTargetIsConnected,
+            reprogInitComplete: reprogInitComplete,
+            hasInflightWork: hasInflightWork
+        )
+    }
+    #endif
 
     // MARK: - Setup / Teardown
 
@@ -365,12 +922,17 @@ class LogiDeviceSession {
         reportingQueryTimer?.invalidate()
         reportingQueryTimer = nil
         pendingDiscovery.removeAll()
+        controlInfoRetryCounts.removeAll()
+        cancelDivertReassertion()
+        cancelBLEStandardUndivertGuard()
         releaseAllActiveButtonState(reason: "teardown")
         if let reprogIdx = featureIndex[Self.featureReprogV4] {
             for cid in divertedCIDs {
                 setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
             }
         }
+        cancelDivertReassertion()
+        pendingSetControlReportingAcks.removeAll()
         lastApplied.removeAll()
         divertedCIDs.removeAll()
         discoveredControls.removeAll()
@@ -536,6 +1098,20 @@ class LogiDeviceSession {
         controlInfoQueryTimer?.invalidate()
         controlInfoQueryTimer = Timer.scheduledTimer(withTimeInterval: Self.reprogQueryTimeout, repeats: false) { [weak self] _ in
             guard let self = self else { return }
+            let retryCount = self.controlInfoRetryCounts[index] ?? 0
+            if Self.shouldRetryControlInfoTimeout(
+                connectionMode: self.connectionMode,
+                retryCount: retryCount
+            ), let idx = self.featureIndex[Self.featureReprogV4] {
+                self.controlInfoRetryCounts[index] = retryCount + 1
+                LogiDebugPanel.log(
+                    "[\(self.deviceInfo.name)] GetControlInfo[\(index)] timed out, retrying (\(retryCount + 1)/\(Self.bleControlInfoRetryLimit))"
+                )
+                self.sendGetControlInfo(featureIndex: idx, index: index)
+                return
+            }
+
+            self.controlInfoRetryCounts.removeValue(forKey: index)
             LogiDebugPanel.log("[\(self.deviceInfo.name)] GetControlInfo[\(index)] timed out, skipping")
             self.advanceControlInfoQuery()
         }
@@ -545,6 +1121,7 @@ class LogiDeviceSession {
     private func advanceControlInfoQuery() {
         controlInfoQueryTimer?.invalidate()
         controlInfoQueryTimer = nil
+        controlInfoRetryCounts.removeValue(forKey: reprogQueryIndex)
         reprogQueryIndex += 1
         if reprogQueryIndex < reprogControlCount, let idx = featureIndex[Self.featureReprogV4] {
             sendGetControlInfo(featureIndex: idx, index: reprogQueryIndex)
@@ -555,26 +1132,130 @@ class LogiDeviceSession {
     }
 
     private func setControlReporting(featureIndex: UInt8, cid: UInt16, divert: Bool) {
-        let cidH = UInt8(cid >> 8)
-        let cidL = UInt8(cid & 0xFF)
+        sendControlReporting(
+            featureIndex: featureIndex,
+            cid: cid,
+            divert: divert,
+            updateLocalState: true,
+            debugSource: "setControlReporting"
+        )
+    }
 
-        // HID++ Xvalid 位机制: 每个标志有一个相邻的 valid 位
-        // valid=1 时固件才修改该标志, valid=0 的位保持原值不变
-        //   bit0=divert(值)  bit1=divertValid
-        //   bit2=persistDivert(值)  bit3=persistDivertValid
-        //   bit4=rawXY(值)  bit5=rawXYValid
-        // 只设置 divert + divertValid, 其余 valid=0 → 固件不碰 persist/remap
-        let flagsByte: UInt8 = divert ? 0x03 : 0x02  // bit0=值, bit1=valid=1
-
-        // targetCID=0x0000: 协议约定 "不改变现有 remap 目标"
+    private func sendControlReporting(
+        featureIndex: UInt8,
+        cid: UInt16,
+        divert: Bool,
+        updateLocalState: Bool,
+        debugSource: String
+    ) {
+        let params = Self.controlReportingParams(
+            connectionMode: connectionMode,
+            cid: cid,
+            divert: divert
+        )
+        guard !params.isEmpty else { return }
+        recordPendingSetControlReportingAck(cid: cid, params: params)
         sendRequest(featureIndex: featureIndex, functionId: 3,
-                         params: [cidH, cidL, flagsByte, 0x00, 0x00])
-        if divert { divertedCIDs.insert(cid) } else { divertedCIDs.remove(cid) }
+                         params: params)
+        if updateLocalState {
+            if divert { divertedCIDs.insert(cid) } else { divertedCIDs.remove(cid) }
+        }
         // 方案 B: 不再本地改写 reportingFlags.
         // reportingFlags 永远反映 "GetControlReporting 响应的真值" (设备层状态, Mos 接管前).
         // Mos 自己的 divert 视角由 divertedCIDs 集合唯一表达, 避免污染冲突判定的依据.
         LogiDebugPanel.log("[\(deviceInfo.name)] CID \(String(format: "0x%04X", cid)) divert=\(divert ? "ON" : "OFF")")
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] \(debugSource) cid=\(String(format: "0x%04X", cid)) divert=\(divert) params=\(params.map { String(format: "%02X", $0) }.joined(separator: " ")) localState=\(updateLocalState ? "updated" : "preserved") diverted=\(LogiTrace.cids(divertedCIDs))",
+            device: deviceInfo.name
+        )
+        #endif
     }
+
+    private func recordPendingSetControlReportingAck(cid: UInt16, params: [UInt8]) {
+        guard params.count >= 5 else { return }
+        let targetCID = (UInt16(params[3]) << 8) | UInt16(params[4])
+        pendingSetControlReportingAcks[cid] = PendingSetControlReportingAck(
+            flagsByte: params[2],
+            targetCID: targetCID,
+            expiresAt: Date().addingTimeInterval(Self.pendingSetControlReportingAckTTL)
+        )
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] pending SetReporting ACK cid=\(String(format: "0x%04X", cid)) flags=\(String(format: "0x%02X", params[2])) target=\(String(format: "0x%04X", targetCID))",
+            device: deviceInfo.name
+        )
+        #endif
+    }
+
+    private func consumePendingSetControlReportingAck(_ ack: SetControlReportingAck) -> Bool {
+        guard let pending = pendingSetControlReportingAcks[ack.cid] else {
+            #if DEBUG
+            LogiTrace.log(
+                "[Session] SetReporting ACK no pending cid=\(String(format: "0x%04X", ack.cid)) flags=\(String(format: "0x%02X", ack.flagsByte)) target=\(String(format: "0x%04X", ack.targetCID))",
+                device: deviceInfo.name
+            )
+            #endif
+            return false
+        }
+        guard Date() <= pending.expiresAt else {
+            pendingSetControlReportingAcks.removeValue(forKey: ack.cid)
+            #if DEBUG
+            LogiTrace.log(
+                "[Session] SetReporting ACK pending expired cid=\(String(format: "0x%04X", ack.cid))",
+                device: deviceInfo.name
+            )
+            #endif
+            return false
+        }
+        guard pending.flagsByte == ack.flagsByte,
+              pending.targetCID == ack.targetCID else {
+            #if DEBUG
+            LogiTrace.log(
+                "[Session] SetReporting ACK pending mismatch cid=\(String(format: "0x%04X", ack.cid)) pendingFlags=\(String(format: "0x%02X", pending.flagsByte)) ackFlags=\(String(format: "0x%02X", ack.flagsByte)) pendingTarget=\(String(format: "0x%04X", pending.targetCID)) ackTarget=\(String(format: "0x%04X", ack.targetCID))",
+                device: deviceInfo.name
+            )
+            #endif
+            return false
+        }
+        pendingSetControlReportingAcks.removeValue(forKey: ack.cid)
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] SetReporting ACK consumed cid=\(String(format: "0x%04X", ack.cid)) flags=\(String(format: "0x%02X", ack.flagsByte)) target=\(String(format: "0x%04X", ack.targetCID))",
+            device: deviceInfo.name
+        )
+        #endif
+        return true
+    }
+
+    private static func controlReportingParams(
+        connectionMode: ConnectionMode,
+        cid: UInt16,
+        divert: Bool
+    ) -> [UInt8] {
+        let cidH = UInt8(cid >> 8)
+        let cidL = UInt8(cid & 0xFF)
+        // HID++ Xvalid: bit0=divert value, bit1=divert valid.
+        let flagsByte: UInt8 = divert ? 0x03 : 0x02
+
+        switch connectionMode {
+        case .bleDirect, .receiver:
+            // targetCID=0x0000: 不改变现有 remap 目标; BLE/Bolt 默认保持同一策略.
+            return [cidH, cidL, flagsByte, 0x00, 0x00]
+        case .unsupported:
+            return []
+        }
+    }
+
+    #if DEBUG
+    internal static func controlReportingParamsForTests(
+        connectionMode: ConnectionMode,
+        cid: UInt16,
+        divert: Bool
+    ) -> [UInt8] {
+        return controlReportingParams(connectionMode: connectionMode, cid: cid, divert: divert)
+    }
+    #endif
 
     // MARK: - Debug Operations (interactive divert control)
 
@@ -587,6 +1268,7 @@ class LogiDeviceSession {
         reprogControlCount = 0
         reprogQueryIndex = 0
         reportingQueryIndex = 0
+        controlInfoRetryCounts.removeAll()
         releaseAllActiveButtonState(reason: "rediscover")
         lastApplied.removeAll()
         divertedCIDs.removeAll()
@@ -608,10 +1290,33 @@ class LogiDeviceSession {
         reportingQueryTimer?.invalidate(); reportingQueryTimer = nil
         pendingDiscovery.removeAll()
         pendingCacheValidation = nil
+        controlInfoRetryCounts.removeAll()
+        cancelDivertReassertion()
+        cancelBLEStandardUndivertGuard()
+        pendingSetControlReportingAcks.removeAll()
+    }
+
+    private func cancelDivertReassertion() {
+        divertReassertionWorkItem?.cancel()
+        divertReassertionWorkItem = nil
+    }
+
+    private func cancelBLEStandardUndivertGuard() {
+        #if DEBUG
+        if bleStandardUndivertGuardWorkItem != nil || !bleStandardUndivertGuardTargets.isEmpty {
+            LogiTrace.log("[StandardButtonGuard] cancel generation=\(bleStandardUndivertGuardGeneration) targets=\(LogiTrace.cids(bleStandardUndivertGuardTargets))", device: deviceInfo.name)
+        }
+        #endif
+        bleStandardUndivertGuardGeneration += 1
+        bleStandardUndivertGuardWorkItem?.cancel()
+        bleStandardUndivertGuardWorkItem = nil
+        bleStandardUndivertGuardTargets.removeAll()
+        pendingBLEUndivertGuardQueries.removeAll()
     }
 
     func redivertAllControls() {
         releaseAllActiveButtonState(reason: "redivert")
+        cancelBLEStandardUndivertGuard()
         reprogInitComplete = true
         divertedCIDs.removeAll()
         lastApplied.removeAll()
@@ -621,6 +1326,14 @@ class LogiDeviceSession {
 
     func undivertAllControls() {
         releaseAllActiveButtonState(reason: "undivert all")
+        cancelBLEStandardUndivertGuard()
+        guard currentReceiverTargetIsConnected else {
+            lastApplied.removeAll()
+            divertedCIDs.removeAll()
+            reprogInitComplete = false
+            LogiDebugPanel.log("[\(deviceInfo.name)] Cleared local divert state; receiver target disconnected")
+            return
+        }
         guard let idx = featureIndex[Self.featureReprogV4] else {
             lastApplied.removeAll()
             reprogInitComplete = false
@@ -637,6 +1350,7 @@ class LogiDeviceSession {
 
     func toggleDivert(cid: UInt16) {
         guard let idx = featureIndex[Self.featureReprogV4] else { return }
+        guard currentReceiverTargetIsConnected else { return }
         let currentlyDiverted = divertedCIDs.contains(cid)
         setControlReporting(featureIndex: idx, cid: cid, divert: !currentlyDiverted)
     }
@@ -775,8 +1489,6 @@ class LogiDeviceSession {
     /// 处理 HID++ 1.0 错误响应 (sub-ID 0x8F)
     private func handleHIDPP10Error(_ report: UnsafeBufferPointer<UInt8>) {
         let devIdx = report[1]
-        let errorSubId = report[3]
-        let errorAddress = report.count > 4 ? report[4] : 0
         let errorCode = report.count > 5 ? report[5] : 0
 
         let hidpp10ErrorNames: [UInt8: String] = [
@@ -917,7 +1629,68 @@ class LogiDeviceSession {
                 receiverPairedDevices.append(dev)
                 receiverPairedDevices.sort { $0.slot < $1.slot }
             }
+
+            let hasInflightWork = discoveryTimer != nil || controlInfoQueryTimer != nil || reportingQueryTimer != nil
+            let action = Self.receiverConnectionNotificationAction(
+                currentDeviceIndex: deviceIndex,
+                incomingDeviceIndex: devIdx,
+                connected: connected,
+                currentTargetConnectionIsKnown: currentReceiverTargetConnectionIsKnown,
+                currentTargetIsConnected: currentReceiverTargetIsConnected,
+                reprogInitComplete: reprogInitComplete,
+                hasInflightWork: hasInflightWork
+            )
+            LogiDebugPanel.log(
+                "[\(deviceInfo.name)] DeviceConnection action=\(action.debugLabel) current=\(deviceIndex) incoming=\(devIdx) currentKnown=\(currentReceiverTargetConnectionIsKnown) currentConnected=\(currentReceiverTargetIsConnected) reprogInit=\(reprogInitComplete) inflight=\(hasInflightWork)"
+            )
+
+            switch action {
+            case .ignore:
+                break
+            case .currentTargetConnected:
+                handleCurrentReceiverTargetReconnected()
+            case .currentTargetDisconnected:
+                handleCurrentReceiverTargetDisconnected()
+            case .retarget(let slot):
+                setTargetSlot(slot: slot)
+                rediscoverFeatures()
+            }
             NotificationCenter.default.post(name: LogiSessionManager.sessionChangedNotification, object: nil)
+        }
+    }
+
+    private func handleCurrentReceiverTargetDisconnected() {
+        cancelInflightDiscovery()
+        releaseAllActiveButtonState(reason: "receiver target disconnected")
+        lastApplied.removeAll()
+        divertedCIDs.removeAll()
+        reprogInitComplete = false
+        handshakeComplete = false
+        reportingQueryIndex = 0
+        setDiscoveryInFlight(false)
+        LogiDebugPanel.log("[\(deviceInfo.name)] Current receiver target disconnected; local divert state cleared")
+    }
+
+    private func handleCurrentReceiverTargetReconnected() {
+        guard connectionMode == .receiver else { return }
+        let hasInflightWork = discoveryTimer != nil || controlInfoQueryTimer != nil || reportingQueryTimer != nil
+        let action = Self.receiverReconnectAction(
+            hasReprogFeature: featureIndex[Self.featureReprogV4] != nil,
+            discoveredControlCount: discoveredControls.count,
+            reprogControlCount: reprogControlCount,
+            hasInflightWork: hasInflightWork
+        )
+
+        switch action {
+        case .ignore:
+            return
+        case .refreshReporting:
+            LogiDebugPanel.log("[\(deviceInfo.name)] Current receiver target reconnected; refreshing reporting state")
+            setDiscoveryInFlight(true)
+            startReportingQuery()
+        case .rediscoverFeatures:
+            LogiDebugPanel.log("[\(deviceInfo.name)] Current receiver target reconnected; rediscovering features")
+            rediscoverFeatures()
         }
     }
 
@@ -963,6 +1736,7 @@ class LogiDeviceSession {
         let devIdx = report[1]
         let featIdx = report[2]
         let funcId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
 
         // HID++ 1.0 error (sub-ID 0x8F)
         if connectionMode == .receiver && featIdx == Self.hidpp10ErrorMsg {
@@ -1013,16 +1787,7 @@ class LogiDeviceSession {
             }
         }
         if let reprogIdx = featureIndex[Self.featureReprogV4], featIdx == reprogIdx {
-            if !reprogInitComplete && funcId == 0 {
-                return "REPROG.ControlCount = \(report[4])"
-            }
-            if funcId == 1 {
-                let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
-                let name = LogiCIDDirectory.name(forCID: cid)
-                return "REPROG.ControlInfo: CID=\(String(format: "0x%04X", cid)) (\(name))"
-            }
-            if reprogInitComplete && funcId == 0 {
-                // divertedButtonsEvent
+            if funcId == 0 && softwareId == 0x00 {
                 var cids: [String] = []
                 var offset = 4
                 while offset + 1 < report.count {
@@ -1033,6 +1798,19 @@ class LogiDeviceSession {
                     offset += 2
                 }
                 return cids.isEmpty ? "BUTTON EVENT: all released" : "BUTTON EVENT: \(cids.joined(separator: " + "))"
+            }
+            if funcId == 0 && softwareId == 0x01 {
+                return reprogInitComplete
+                    ? "REPROG.ControlCount response = \(report[4])"
+                    : "REPROG.ControlCount = \(report[4])"
+            }
+            if !reprogInitComplete && funcId == 0 {
+                return "REPROG.func0 swid=\(softwareId) ignored during init"
+            }
+            if funcId == 1 {
+                let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
+                let name = LogiCIDDirectory.name(forCID: cid)
+                return "REPROG.ControlInfo: CID=\(String(format: "0x%04X", cid)) (\(name))"
             }
             if funcId == 2 && report.count >= 9 {
                 let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
@@ -1049,6 +1827,11 @@ class LogiDeviceSession {
                 return "REPROG.GetReporting(\(cidName)): \(fStr)\(tStr)"
             }
             if funcId == 3 {
+                if let ack = Self.parseSetControlReportingAck(report) {
+                    let cidName = LogiCIDDirectory.name(forCID: ack.cid)
+                    let divert = ack.temporaryDivertEnabled ? "ON" : "OFF"
+                    return "REPROG.SetControlReporting ACK: CID=\(String(format: "0x%04X", ack.cid)) (\(cidName)) divert=\(divert)"
+                }
                 return "REPROG.SetControlReporting ACK"
             }
         }
@@ -1277,6 +2060,271 @@ class LogiDeviceSession {
 
     // MARK: - Report Parsing
 
+    private static func isGetControlReportingQueryResponse(_ report: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard report.count >= 9 else { return false }
+        let functionId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
+        return functionId == 2 && softwareId == 0x01
+    }
+
+    private static func parseReportingResponse(_ report: UnsafeBufferPointer<UInt8>) -> ReportingResponse? {
+        guard isGetControlReportingQueryResponse(report) else { return nil }
+        let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
+        let targetCID = (UInt16(report[7]) << 8) | UInt16(report[8])
+        return ReportingResponse(cid: cid, reportingFlags: report[6], targetCID: targetCID)
+    }
+
+    private static func isReportingStateNotification(_ report: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard report.count >= 9 else { return false }
+        let functionId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
+        return functionId == 2 && softwareId == 0x00
+    }
+
+    private static func parseReportingStateNotification(_ report: UnsafeBufferPointer<UInt8>) -> ReportingResponse? {
+        guard isReportingStateNotification(report) else { return nil }
+        let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
+        let targetCID = (UInt16(report[7]) << 8) | UInt16(report[8])
+        return ReportingResponse(cid: cid, reportingFlags: report[6], targetCID: targetCID)
+    }
+
+    private static func isSetControlReportingAck(_ report: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard report.count >= 9 else { return false }
+        let functionId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
+        return functionId == 3 && softwareId == 0x01
+    }
+
+    private static func parseSetControlReportingAck(_ report: UnsafeBufferPointer<UInt8>) -> SetControlReportingAck? {
+        guard isSetControlReportingAck(report) else { return nil }
+        let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
+        let targetCID = (UInt16(report[7]) << 8) | UInt16(report[8])
+        return SetControlReportingAck(cid: cid, flagsByte: report[6], targetCID: targetCID)
+    }
+
+    private static func isDivertedButtonEvent(_ report: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard report.count >= 4 else { return false }
+        let functionId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
+        return functionId == 0 && softwareId == 0x00
+    }
+
+    private static func reprogInitFunction0Route(_ report: UnsafeBufferPointer<UInt8>) -> ReprogInitFunction0Route {
+        guard report.count >= 4 else { return .ignored }
+        let functionId = report[3] >> 4
+        guard functionId == 0 else { return .ignored }
+
+        switch report[3] & 0x0F {
+        case 0x00:
+            return .divertedButtonEvent
+        case 0x01:
+            return .getControlCountResponse
+        default:
+            return .ignored
+        }
+    }
+
+    private static func shouldRetryControlInfoTimeout(
+        connectionMode: ConnectionMode,
+        retryCount: Int
+    ) -> Bool {
+        return connectionMode == .bleDirect && retryCount < bleControlInfoRetryLimit
+    }
+
+    private static func isIRootPingResponse(_ report: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard report.count >= 4 else { return false }
+        let featureIdx = report[2]
+        let functionId = report[3] >> 4
+        let softwareId = report[3] & 0x0F
+        return featureIdx == 0x00 && functionId == 1 && softwareId == 0x01
+    }
+
+    private static func reassertionCIDForSetControlReportingAck(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        ack: SetControlReportingAck,
+        isOwnAck: Bool
+    ) -> UInt16? {
+        guard !isOwnAck,
+              lastApplied.contains(ack.cid) || divertedCIDs.contains(ack.cid),
+              ack.updatesTemporaryDivert,
+              !ack.temporaryDivertEnabled else {
+            return nil
+        }
+        return ack.cid
+    }
+
+    private static func reassertionCIDForReportingState(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        state: ReportingResponse
+    ) -> UInt16? {
+        guard lastApplied.contains(state.cid) || divertedCIDs.contains(state.cid),
+              (state.reportingFlags & 0x01) == 0 else {
+            return nil
+        }
+        return state.cid
+    }
+
+    #if DEBUG
+    internal static func isGetControlReportingQueryResponseForTests(_ bytes: [UInt8]) -> Bool {
+        return bytes.withUnsafeBufferPointer { report in
+            isGetControlReportingQueryResponse(report)
+        }
+    }
+
+    internal static func isDivertedButtonEventForTests(_ bytes: [UInt8]) -> Bool {
+        return bytes.withUnsafeBufferPointer { report in
+            isDivertedButtonEvent(report)
+        }
+    }
+
+    internal static func reprogInitFunction0RouteForTests(_ bytes: [UInt8]) -> ReprogInitFunction0Route {
+        return bytes.withUnsafeBufferPointer { report in
+            reprogInitFunction0Route(report)
+        }
+    }
+
+    internal static func shouldRetryControlInfoTimeoutForTests(
+        connectionMode: ConnectionMode,
+        retryCount: Int
+    ) -> Bool {
+        return shouldRetryControlInfoTimeout(
+            connectionMode: connectionMode,
+            retryCount: retryCount
+        )
+    }
+
+    internal static func isIRootPingResponseForTests(_ bytes: [UInt8]) -> Bool {
+        return bytes.withUnsafeBufferPointer { report in
+            isIRootPingResponse(report)
+        }
+    }
+
+    internal static func reportingResponseForTests(_ bytes: [UInt8], matchesExpectedCID expectedCID: UInt16) -> Bool {
+        return bytes.withUnsafeBufferPointer { report in
+            parseReportingResponse(report)?.cid == expectedCID
+        }
+    }
+
+    internal static func setControlReportingAckForTests(
+        _ bytes: [UInt8]
+    ) -> (cid: UInt16, flagsByte: UInt8, targetCID: UInt16)? {
+        return bytes.withUnsafeBufferPointer { report in
+            guard let ack = parseSetControlReportingAck(report) else { return nil }
+            return (ack.cid, ack.flagsByte, ack.targetCID)
+        }
+    }
+
+    internal static func reportingStateNotificationForTests(
+        _ bytes: [UInt8]
+    ) -> (cid: UInt16, reportingFlags: UInt8, targetCID: UInt16)? {
+        return bytes.withUnsafeBufferPointer { report in
+            guard let state = parseReportingStateNotification(report) else { return nil }
+            return (state.cid, state.reportingFlags, state.targetCID)
+        }
+    }
+
+    internal static func reassertionCIDForSetControlReportingAckForTests(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        ackBytes: [UInt8],
+        isOwnAck: Bool
+    ) -> UInt16? {
+        return ackBytes.withUnsafeBufferPointer { report in
+            guard let ack = parseSetControlReportingAck(report) else { return nil }
+            return reassertionCIDForSetControlReportingAck(
+                lastApplied: lastApplied,
+                divertedCIDs: divertedCIDs,
+                ack: ack,
+                isOwnAck: isOwnAck
+            )
+        }
+    }
+
+    internal static func reassertionCIDForReportingStateForTests(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        bytes: [UInt8]
+    ) -> UInt16? {
+        return bytes.withUnsafeBufferPointer { report in
+            guard let state = parseReportingStateNotification(report) else { return nil }
+            return reassertionCIDForReportingState(
+                lastApplied: lastApplied,
+                divertedCIDs: divertedCIDs,
+                state: state
+            )
+        }
+    }
+
+    #endif
+
+    private func handleBLEUndivertGuardReportingResponseIfNeeded(
+        _ report: UnsafeBufferPointer<UInt8>
+    ) -> Bool {
+        guard let response = Self.parseReportingResponse(report),
+              let pending = pendingBLEUndivertGuardQueries.removeValue(forKey: response.cid) else {
+            return false
+        }
+
+        let elapsed = Date().timeIntervalSince(pending.sentAt)
+        updateDiscoveredControlReportingState(response, markQueried: true)
+        #if DEBUG
+        LogiTrace.log(
+            "[StandardButtonGuard] RX GetControlReporting cid=\(String(format: "0x%04X", response.cid)) flags=\(String(format: "0x%02X", response.reportingFlags)) target=\(String(format: "0x%04X", response.targetCID)) after=\(String(format: "%.3fs", elapsed)) active=\(LogiTrace.cids(bleStandardUndivertGuardTargets))",
+            device: deviceInfo.name
+        )
+        #endif
+
+        _ = handleStandardButtonGuardState(response, reason: "standard-button guard GetControlReporting")
+        return true
+    }
+
+    private func handleStandardButtonGuardState(_ state: ReportingResponse, reason: String) -> Bool {
+        let targets = bleStandardButtonUndivertPlanner.undivertTargets(
+            activeNativeFirstCIDs: bleStandardUndivertGuardTargets,
+            reportingFlagsByCID: [state.cid: state.reportingFlags]
+        )
+        guard targets.contains(state.cid) else {
+            #if DEBUG
+            LogiTrace.log("[StandardButtonGuard] state did not require OFF cid=\(String(format: "0x%04X", state.cid)) flags=\(String(format: "0x%02X", state.reportingFlags))", device: deviceInfo.name)
+            #endif
+            return false
+        }
+
+        enforceStandardButtonGuard(cid: state.cid, reason: reason)
+        return true
+    }
+
+    private func enforceStandardButtonGuard(cid: UInt16, reason: String) {
+        guard connectionMode == .bleDirect,
+              currentReceiverTargetIsConnected,
+              bleStandardUndivertGuardTargets.contains(cid),
+              let reprogIdx = featureIndex[Self.featureReprogV4] else {
+            return
+        }
+
+        #if DEBUG
+        LogiTrace.log("[StandardButtonGuard] \(reason) -> SetControlReporting OFF cid=\(String(format: "0x%04X", cid))", device: deviceInfo.name)
+        LogiDebugPanel.log("[\(deviceInfo.name)] Standard-button guard cleared divert for \(String(format: "0x%04X", cid))")
+        #endif
+        setControlReporting(featureIndex: reprogIdx, cid: cid, divert: false)
+    }
+
+    private func updateDiscoveredControlReportingState(
+        _ response: ReportingResponse,
+        markQueried: Bool
+    ) {
+        guard let idx = discoveredControls.firstIndex(where: { $0.cid == response.cid }) else {
+            return
+        }
+        discoveredControls[idx].reportingFlags = response.reportingFlags
+        discoveredControls[idx].targetCID = response.targetCID
+        if markQueried {
+            discoveredControls[idx].reportingQueried = true
+        }
+    }
+
     func handleInputReport(_ report: UnsafeBufferPointer<UInt8>) {
         guard report.count >= 7 else { return }
         guard report[0] == Self.hidppShortReportId || report[0] == Self.hidppLongReportId else { return }
@@ -1343,13 +2391,12 @@ class LogiDeviceSession {
 
             // REPROG_V4 query 错误: 跳过该 CID 继续下一个, 防止 Bolt receiver 上 query 链路卡死
             if let reprogIdx = featureIndex[Self.featureReprogV4],
-               originalFeatureIdx == reprogIdx,
-               !reprogInitComplete {
+               originalFeatureIdx == reprogIdx {
                 switch originalFuncId {
-                case 1:  // GetControlInfo
+                case 1 where !reprogInitComplete:  // GetControlInfo
                     LogiDebugPanel.log("[\(deviceInfo.name)] GetControlInfo[\(reprogQueryIndex)] returned error, skipping")
                     advanceControlInfoQuery()
-                case 2:  // GetControlReporting
+                case 2 where reportingQueryTimer != nil:  // GetControlReporting
                     LogiDebugPanel.log("[\(deviceInfo.name)] GetControlReporting[\(reportingQueryIndex)] returned error, skipping")
                     advanceReportingQuery()
                 default:
@@ -1368,25 +2415,63 @@ class LogiDeviceSession {
                 sendGetControlCount(featureIndex: reprogIdx)
                 return
             }
-            handleDiscoveryResponse(report)
+            if !pendingDiscovery.isEmpty {
+                handleDiscoveryResponse(report)
+            }
             return
         }
 
         // REPROG_CONTROLS_V4
         if let reprogIdx = featureIndex[Self.featureReprogV4], featureIdx == reprogIdx {
+            if Self.isGetControlReportingQueryResponse(report),
+               handleBLEUndivertGuardReportingResponseIfNeeded(report) {
+                return
+            }
+
+            if reportingQueryTimer != nil,
+               Self.isGetControlReportingQueryResponse(report) {
+                handleGetControlReportingResponse(report)
+                return
+            }
+
+            if Self.isSetControlReportingAck(report) {
+                handleSetControlReportingAck(report)
+                return
+            }
+
             if reprogInitComplete {
-                // init 完成后: 所有 REPROG 消息都是 button event (function 0 = divertedButtonsEvent)
-                if functionId == 0 {
+                // init 完成后: function 0 是按键事件; function 2/3 可能是状态通知或 ACK.
+                if Self.isDivertedButtonEvent(report) {
                     handleDivertedButtonEvent(report)
+                } else if Self.isReportingStateNotification(report) {
+                    handleReportingStateNotification(report)
                 }
-                // function 3 = SetControlReporting ACK, 忽略
-                // function 1/2 等也忽略
+                // function 1/其他 function 2 等忽略
             } else {
                 // init 阶段: 按 function ID 路由
                 switch functionId {
-                case 0: handleGetControlCountResponse(report)
+                case 0:
+                    switch Self.reprogInitFunction0Route(report) {
+                    case .divertedButtonEvent:
+                        #if DEBUG
+                        LogiTrace.log("[Session] init-phase REPROG func0 routed as button event", device: deviceInfo.name)
+                        #endif
+                        handleDivertedButtonEvent(report)
+                    case .getControlCountResponse:
+                        handleGetControlCountResponse(report)
+                    case .ignored:
+                        #if DEBUG
+                        let softwareId = report[3] & 0x0F
+                        LogiTrace.log(
+                            "[Session] init-phase REPROG func0 ignored swid=\(String(format: "0x%02X", softwareId))",
+                            device: deviceInfo.name
+                        )
+                        #endif
+                    }
                 case 1: handleGetControlInfoResponse(report)
-                case 2: handleGetControlReportingResponse(report)
+                // Redundant fallback: normal reporting queries have a timer and route above.
+                case 2 where Self.isGetControlReportingQueryResponse(report):
+                    handleGetControlReportingResponse(report)
                 default: break  // ACK 等直接忽略, 不当作 button event
                 }
             }
@@ -1560,6 +2645,7 @@ class LogiDeviceSession {
     private func handleGetControlCountResponse(_ report: UnsafeBufferPointer<UInt8>) {
         reprogControlCount = Int(report[4])
         reprogQueryIndex = 0
+        controlInfoRetryCounts.removeAll()
         discoveredControls.removeAll()
         LogiDebugPanel.log("[\(deviceInfo.name)] GetControlCount = \(reprogControlCount)")
         if reprogControlCount > 0, let idx = featureIndex[Self.featureReprogV4] {
@@ -1597,6 +2683,7 @@ class LogiDeviceSession {
     /// 进行中(timer 未 nil)也跳过,避免 reportingQueryIndex 被重置导致错位.
     func refreshReportingState() {
         guard connectionMode != .unsupported,
+              currentReceiverTargetIsConnected,
               !discoveredControls.isEmpty,
               featureIndex[Self.featureReprogV4] != nil else { return }
         if reportingQueryTimer != nil { return }
@@ -1606,7 +2693,11 @@ class LogiDeviceSession {
 
     /// 开始逐个查询按键的 reporting 状态
     private func startReportingQuery() {
+        pendingBLEUndivertGuardQueries.removeAll()
         reportingQueryIndex = 0
+        for index in discoveredControls.indices {
+            discoveredControls[index].reportingQueried = false
+        }
         guard !discoveredControls.isEmpty, let idx = featureIndex[Self.featureReprogV4] else {
             divertBoundControls()
             // 镜像 advanceReportingQuery 正常终态: 即使 controls 为空也必须 post,
@@ -1658,62 +2749,266 @@ class LogiDeviceSession {
     }
 
     private func handleGetControlReportingResponse(_ report: UnsafeBufferPointer<UInt8>) {
-        guard report.count >= 9 else { return }
-        // response: byte[4-5]=CID, byte[6]=reportingFlags, byte[7-8]=targetCID
-        let cid = (UInt16(report[4]) << 8) | UInt16(report[5])
-        let reportingFlags = report[6]
-        let targetCID = (UInt16(report[7]) << 8) | UInt16(report[8])
+        guard let response = Self.parseReportingResponse(report) else { return }
+        let expectedCID = reportingQueryIndex < discoveredControls.count
+            ? discoveredControls[reportingQueryIndex].cid
+            : nil
+        let matchesExpectedCID = expectedCID == response.cid
 
-        if let idx = discoveredControls.firstIndex(where: { $0.cid == cid }) {
-            discoveredControls[idx].reportingFlags = reportingFlags
-            discoveredControls[idx].targetCID = targetCID
-            discoveredControls[idx].reportingQueried = true
-        }
+        updateDiscoveredControlReportingState(response, markQueried: matchesExpectedCID)
 
-        let cidName = LogiCIDDirectory.name(forCID: cid)
+        let cidName = LogiCIDDirectory.name(forCID: response.cid)
         let flagParts: [String] = [
-            (reportingFlags & 0x01) != 0 ? "tmpDivert" : nil,
-            (reportingFlags & 0x02) != 0 ? "persistDivert" : nil,
-            (reportingFlags & 0x04) != 0 ? "tmpRemap" : nil,
-            (reportingFlags & 0x08) != 0 ? "persistRemap" : nil,
+            (response.reportingFlags & 0x01) != 0 ? "tmpDivert" : nil,
+            (response.reportingFlags & 0x02) != 0 ? "persistDivert" : nil,
+            (response.reportingFlags & 0x04) != 0 ? "tmpRemap" : nil,
+            (response.reportingFlags & 0x08) != 0 ? "persistRemap" : nil,
         ].compactMap { $0 }
         let flagStr = flagParts.isEmpty ? "none" : flagParts.joined(separator: ",")
-        let targetStr = targetCID != cid && targetCID != 0
-            ? " -> \(String(format: "0x%04X", targetCID))(\(LogiCIDDirectory.name(forCID: targetCID)))"
+        let targetStr = response.targetCID != response.cid && response.targetCID != 0
+            ? " -> \(String(format: "0x%04X", response.targetCID))(\(LogiCIDDirectory.name(forCID: response.targetCID)))"
             : ""
         LogiDebugPanel.log("[\(deviceInfo.name)] Reporting[\(cidName)]: flags=\(flagStr)\(targetStr)")
 
+        guard matchesExpectedCID else {
+            let expected = expectedCID.map { String(format: "0x%04X", $0) } ?? "none"
+            LogiDebugPanel.log("[\(deviceInfo.name)] Stale GetControlReporting response for 0x\(String(format: "%04X", response.cid)) dropped (expected \(expected))")
+            return
+        }
+
         // 继续查询下一个 (或完成)
         advanceReportingQuery()
+    }
+
+    private func handleSetControlReportingAck(_ report: UnsafeBufferPointer<UInt8>) {
+        guard let ack = Self.parseSetControlReportingAck(report) else { return }
+        let isOwnAck = consumePendingSetControlReportingAck(ack)
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] handle SetReporting ACK cid=\(String(format: "0x%04X", ack.cid)) flags=\(String(format: "0x%02X", ack.flagsByte)) target=\(String(format: "0x%04X", ack.targetCID)) own=\(isOwnAck) lastApplied=\(LogiTrace.cids(lastApplied)) diverted=\(LogiTrace.cids(divertedCIDs))",
+            device: deviceInfo.name
+        )
+        #endif
+        guard let cid = Self.reassertionCIDForSetControlReportingAck(
+            lastApplied: lastApplied,
+            divertedCIDs: divertedCIDs,
+            ack: ack,
+            isOwnAck: isOwnAck
+        ) else {
+            #if DEBUG
+            LogiTrace.log("[Session] SetReporting ACK did not imply external clear", device: deviceInfo.name)
+            #endif
+            return
+        }
+
+        handleExternallyClearedDivert(cid: cid, reason: "SetControlReporting ACK")
+    }
+
+    private func handleReportingStateNotification(_ report: UnsafeBufferPointer<UInt8>) {
+        guard let state = Self.parseReportingStateNotification(report) else { return }
+        updateDiscoveredControlReportingState(state, markQueried: true)
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] reporting notification cid=\(String(format: "0x%04X", state.cid)) flags=\(String(format: "0x%02X", state.reportingFlags)) target=\(String(format: "0x%04X", state.targetCID)) lastApplied=\(LogiTrace.cids(lastApplied)) diverted=\(LogiTrace.cids(divertedCIDs))",
+            device: deviceInfo.name
+        )
+        #endif
+        if handleStandardButtonGuardState(state, reason: "native-first reporting notification") {
+            return
+        }
+        guard let cid = Self.reassertionCIDForReportingState(
+                lastApplied: lastApplied,
+                divertedCIDs: divertedCIDs,
+                state: state
+              ) else {
+            #if DEBUG
+            LogiTrace.log("[Session] reporting notification did not imply external clear", device: deviceInfo.name)
+            #endif
+            return
+        }
+
+        handleExternallyClearedDivert(cid: cid, reason: "reporting notification")
+    }
+
+    private func handleExternallyClearedDivert(cid: UInt16, reason: String) {
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] external clear detected reason=\(reason) cid=\(String(format: "0x%04X", cid)) before lastApplied=\(LogiTrace.cids(lastApplied)) diverted=\(LogiTrace.cids(divertedCIDs))",
+            device: deviceInfo.name
+        )
+        #endif
+        lastApplied.remove(cid)
+        divertedCIDs.remove(cid)
+        releaseActiveButtonState(for: [cid], reason: "divert cleared externally")
+        let mode = LogiSessionManager.shared.recordExternalClear(for: ownershipKey(forCID: cid))
+        guard Self.shouldReassertAfterExternalClear(mode: mode) else {
+            LogiDebugPanel.log("[\(deviceInfo.name)] External \(reason) cleared divert for \(String(format: "0x%04X", cid)); reassert suspended (\(mode.debugLabel))")
+            return
+        }
+        LogiDebugPanel.log("[\(deviceInfo.name)] External \(reason) cleared divert for \(String(format: "0x%04X", cid)); scheduling reassert")
+        scheduleDivertReassertion()
+    }
+
+    private static func shouldReassertAfterExternalClear(mode: LogiButtonDeliveryMode) -> Bool {
+        return shouldUseHIDPPDelivery(mode: mode)
+    }
+
+    #if DEBUG
+    internal static func shouldReassertAfterExternalClearForTests(mode: LogiButtonDeliveryMode) -> Bool {
+        return shouldReassertAfterExternalClear(mode: mode)
+    }
+    #endif
+
+    private func scheduleDivertReassertion() {
+        guard divertReassertionWorkItem == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.divertReassertionWorkItem = nil
+            self.reassertDesiredDiverts()
+        }
+        divertReassertionWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.divertReassertionDelay, execute: item)
+    }
+
+    private func reassertDesiredDiverts() {
+        guard reprogInitComplete,
+              currentReceiverTargetIsConnected,
+              featureIndex[Self.featureReprogV4] != nil else {
+            #if DEBUG
+            LogiTrace.log(
+                "[Session] reassertDesiredDiverts skipped reprogInit=\(reprogInitComplete) connected=\(currentReceiverTargetIsConnected) hasReprog=\(featureIndex[Self.featureReprogV4] != nil)",
+                device: deviceInfo.name
+            )
+            #endif
+            return
+        }
+
+        #if DEBUG
+        LogiTrace.log("[Session] reassertDesiredDiverts recording=\(LogiCenter.shared.isRecording)", device: deviceInfo.name)
+        #endif
+        if LogiCenter.shared.isRecording {
+            temporarilyDivertAll()
+        } else {
+            primeFromRegistry()
+        }
     }
 
     /// 初始化完成后: 按 binding 状态 divert 对应按键.
     /// 不再扫全部 divertable 控件 - 避免覆盖 Logitech Options+ 等第三方进程的 divert 设置.
     /// 跨启动残留: 本进程 Set 为空, 仅能处理当前 bound CID; 曾绑定但已解绑的残留依赖设备断电/重连自然清除 (tmpDivert 固件态).
     private func divertBoundControls() {
+        reconcileAppliedDivertsWithQueriedState()
         reprogInitComplete = true
         handshakeComplete = true
         setDiscoveryInFlight(false)
+        #if DEBUG
+        LogiTrace.log("[Session] divertBoundControls prime registry discovered=\(discoveredControls.count)", device: deviceInfo.name)
+        #endif
         primeFromRegistry()
         LogiDebugPanel.log("[\(deviceInfo.name)] Init complete, listening for button events")
     }
 
+    private var queriedControlStates: [QueriedControlState] {
+        return discoveredControls.map {
+            QueriedControlState(
+                cid: $0.cid,
+                reportingFlags: $0.reportingFlags,
+                reportingQueried: $0.reportingQueried
+            )
+        }
+    }
+
+    private func reconcileAppliedDivertsWithQueriedState() {
+        let result = Self.reconciledDivertState(
+            lastApplied: lastApplied,
+            divertedCIDs: divertedCIDs,
+            queriedControls: queriedControlStates
+        )
+        guard !result.lostCIDs.isEmpty else { return }
+
+        releaseActiveButtonState(for: result.lostCIDs, reason: "divert lost")
+        lastApplied = result.lastApplied
+        divertedCIDs = result.divertedCIDs
+        for cid in result.lostCIDs.sorted() {
+            let mode = LogiSessionManager.shared.recordExternalClear(for: ownershipKey(forCID: cid))
+            LogiDebugPanel.log(
+                "[\(deviceInfo.name)] Reconciled lost divert state for CID \(String(format: "0x%04X", cid)); delivery=\(mode.debugLabel)"
+            )
+        }
+    }
+
+    private static func reconciledDivertState(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        queriedControls: [QueriedControlState]
+    ) -> (lastApplied: Set<UInt16>, divertedCIDs: Set<UInt16>, lostCIDs: Set<UInt16>) {
+        let lostCIDs = Set(queriedControls.compactMap { control -> UInt16? in
+            guard lastApplied.contains(control.cid),
+                  control.reportingQueried,
+                  (control.reportingFlags & 0x01) == 0 else {
+                return nil
+            }
+            return control.cid
+        })
+
+        return (
+            lastApplied: lastApplied.subtracting(lostCIDs),
+            divertedCIDs: divertedCIDs.subtracting(lostCIDs),
+            lostCIDs: lostCIDs
+        )
+    }
+
+    #if DEBUG
+    internal static func reconciledDivertStateForTests(
+        lastApplied: Set<UInt16>,
+        divertedCIDs: Set<UInt16>,
+        queriedControls: [QueriedControlState]
+    ) -> (lastApplied: Set<UInt16>, divertedCIDs: Set<UInt16>) {
+        let result = reconciledDivertState(
+            lastApplied: lastApplied,
+            divertedCIDs: divertedCIDs,
+            queriedControls: queriedControls
+        )
+        return (lastApplied: result.lastApplied, divertedCIDs: result.divertedCIDs)
+    }
+    #endif
+
     /// 录制模式: 临时 divert 所有 divertable 按键
     func temporarilyDivertAll() {
         guard let idx = featureIndex[Self.featureReprogV4] else { return }
-        let divertable = discoveredControls.filter { $0.isDivertable }
-        for c in divertable where !divertedCIDs.contains(c.cid) {
-            setControlReporting(featureIndex: idx, cid: c.cid, divert: true)
+        guard currentReceiverTargetIsConnected else { return }
+        let divertable = Set(discoveredControls.filter { $0.isDivertable }.map { $0.cid })
+        let plan = Self.recordingDivertPlan(
+            divertableCIDs: divertable,
+            lastApplied: lastApplied,
+            transport: LogiTransportIdentity(connectionMode),
+            policy: LogiButtonDeliveryPolicy.default
+        )
+        #if DEBUG
+        LogiTrace.log(
+            "[Session] temporarilyDivertAll divertable=\(LogiTrace.cids(divertable)) desired=\(LogiTrace.cids(plan.desired)) toDivert=\(LogiTrace.cids(plan.toDivert)) toUndivert=\(LogiTrace.cids(plan.toUndivert)) beforeLastApplied=\(LogiTrace.cids(lastApplied))",
+            device: deviceInfo.name
+        )
+        #endif
+        releaseActiveButtonState(for: plan.toUndivert, reason: "recording uses native mouse events")
+        for cid in plan.toDivert.sorted() {
+            setControlReporting(featureIndex: idx, cid: cid, divert: true)
         }
-        // Sync lastApplied with the full divertable set so restoreDivertToBindings'
+        for cid in plan.toUndivert.sorted() {
+            setControlReporting(featureIndex: idx, cid: cid, divert: false)
+        }
+        // Sync lastApplied with the recording target set so restoreDivertToBindings'
         // applyUsage diff (toUndivert = lastApplied - targetCIDs) can correctly
-        // compute toUndivert for recording-only CIDs after recording ends.
-        self.lastApplied = Set(divertable.map { $0.cid })
-        LogiDebugPanel.log("[\(deviceInfo.name)] Temporarily diverted all \(divertable.count) controls (recording mode)")
+        // compute toUndivert for recording-only HID++ CIDs after recording ends.
+        self.lastApplied = plan.desired
+        LogiDebugPanel.log("[\(deviceInfo.name)] Temporarily diverted \(plan.desired.count)/\(divertable.count) controls (recording mode)")
     }
 
     /// 录制结束: 恢复到只 divert 有绑定的状态
     func restoreDivertToBindings() {
+        #if DEBUG
+        LogiTrace.log("[Session] restoreDivertToBindings via registry", device: deviceInfo.name)
+        #endif
         primeFromRegistry()
     }
 
@@ -1726,7 +3021,22 @@ class LogiDeviceSession {
             activeCIDs.insert(cid)
             offset += 2
         }
+        #if DEBUG
+        let previousCIDs = buttonStateTracker.activeCIDs
+        LogiDebugPanel.log(
+            device: deviceInfo.name,
+            type: .buttonEvent,
+            message: "Button RAW: active=\(debugCIDList(activeCIDs)) previous=\(debugCIDList(previousCIDs)) report=\(debugReportBytes(report))"
+        )
+        #endif
         let delta = buttonStateTracker.update(activeCIDs: activeCIDs)
+        #if DEBUG
+        LogiDebugPanel.log(
+            device: deviceInfo.name,
+            type: .buttonEvent,
+            message: "Button DELTA: pressed=\(debugCIDList(delta.pressed)) released=\(debugCIDList(delta.released)) now=\(debugCIDList(buttonStateTracker.activeCIDs))"
+        )
+        #endif
         for cid in delta.pressed {
             let cidName = LogiCIDDirectory.name(forCID: cid)
             LogiDebugPanel.log(device: deviceInfo.name, type: .buttonEvent, message: "Button DOWN: CID \(String(format: "0x%04X", cid)) (\(cidName))")
@@ -1738,6 +3048,31 @@ class LogiDeviceSession {
             dispatchButtonEvent(cid: cid, isDown: false)
         }
     }
+
+    #if DEBUG
+    private func debugCIDList(_ cids: Set<UInt16>) -> String {
+        guard !cids.isEmpty else { return "[]" }
+        let values = cids.sorted().map { cid in
+            "\(String(format: "0x%04X", cid))(\(LogiCIDDirectory.name(forCID: cid)))"
+        }
+        return "[\(values.joined(separator: ","))]"
+    }
+
+    private func debugReportBytes(_ report: UnsafeBufferPointer<UInt8>) -> String {
+        report.map { String(format: "%02X", $0) }.joined(separator: " ")
+    }
+
+    private func debugDispatchResultLabel(_ result: LogiDispatchResult) -> String {
+        switch result {
+        case .consumed:
+            return "consumed"
+        case .unhandled:
+            return "unhandled"
+        case .logiAction(let name):
+            return "logiAction(\(name))"
+        }
+    }
+    #endif
 
     // MARK: - Event Dispatch
 
@@ -1795,7 +3130,14 @@ class LogiDeviceSession {
         let bridge = LogiCenter.shared.externalBridge
 
         if LogiCenter.shared.isRecording {
-            _ = bridge.dispatchLogiButtonEvent(event)
+            let result = bridge.dispatchLogiButtonEvent(event)
+            #if DEBUG
+            LogiDebugPanel.log(
+                device: deviceInfo.name,
+                type: .buttonEvent,
+                message: "Button DISPATCH: CID \(String(format: "0x%04X", cid)) code=\(event.code) phase=\(isDown ? "down" : "up") recording result=\(debugDispatchResultLabel(result))"
+            )
+            #endif
             return
         }
 
@@ -1803,7 +3145,15 @@ class LogiDeviceSession {
         bridge.handleLogiScrollHotkey(code: event.code, phase: event.phase)
 
         // Main routing.
-        switch bridge.dispatchLogiButtonEvent(event) {
+        let result = bridge.dispatchLogiButtonEvent(event)
+        #if DEBUG
+        LogiDebugPanel.log(
+            device: deviceInfo.name,
+            type: .buttonEvent,
+            message: "Button DISPATCH: CID \(String(format: "0x%04X", cid)) code=\(event.code) phase=\(isDown ? "down" : "up") result=\(debugDispatchResultLabel(result))"
+        )
+        #endif
+        switch result {
         case .logiAction(let name) where event.phase == .down:
             executeLogiAction(name)
         case .consumed, .unhandled, .logiAction:

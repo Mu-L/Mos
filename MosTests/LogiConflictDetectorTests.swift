@@ -28,16 +28,16 @@ final class LogiConflictDetectorTests: XCTestCase {
         XCTAssertFalse(s.isConflict)
     }
 
-    func testCoDivert_mosAndForeignBothDivert() {
+    func testMosOwned_whenTemporaryDivertIsActiveAndMosOwnsIt() {
         let s = LogiConflictDetector.status(
-            reportingFlags: 0x01,   // foreign set the bit
+            reportingFlags: 0x01,   // tmpDivert is expected after Mos owns divert
             targetCID: 0,
             cid: cid,
             reportingQueried: true,
-            mosOwnsDivert: true     // mos also set divert
+            mosOwnsDivert: true
         )
-        XCTAssertEqual(s, .coDivert)
-        XCTAssertTrue(s.isConflict, "co-divert must surface as conflict so user sees the double-fire risk")
+        XCTAssertEqual(s, .mosOwned)
+        XCTAssertFalse(s.isConflict)
     }
 
     func testRemapped_targetDiffers() {

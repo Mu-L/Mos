@@ -21,6 +21,8 @@ set -euo pipefail
 
 ZONE_A_ALLOW=(
     LogiCenter
+    LogiButtonCaptureDiagnosis
+    LogiStandardMouseButtonAlias
     UsageSource
     ScrollRole
     ConflictStatus

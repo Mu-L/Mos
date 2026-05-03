@@ -145,9 +145,10 @@ extension PreferencesButtonsViewController {
     }
     
     private func addRecordedEvent(_ event: InputEvent, isDuplicate: Bool) {
-        let recordedEvent = RecordedEvent(from: event)
+        let recordedEvent = normalizedRecordedEventForButtonBinding(from: event)
+        let normalizedDuplicate = buttonBindings.contains(where: { $0.triggerEvent == recordedEvent })
 
-        if isDuplicate {
+        if normalizedDuplicate {
             if let existing = buttonBindings.first(where: { $0.triggerEvent == recordedEvent }) {
                 highlightExistingRow(with: existing.id)
             }
@@ -158,7 +159,18 @@ extension PreferencesButtonsViewController {
         buttonBindings.append(binding)
         tableView.reloadData()
         toggleNoDataHint()
+        notifyBLEHIDPPUnstableIfNeeded(for: recordedEvent)
         syncViewWithOptions()
+    }
+
+    private func notifyBLEHIDPPUnstableIfNeeded(for event: RecordedEvent) {
+        guard event.type == .mouse,
+              LogiCenter.shared.isLogiCode(event.code) else { return }
+        let status = ButtonCapturePresentationStatus.from(
+            LogiCenter.shared.buttonCaptureDiagnosis(forMosCode: event.code)
+        )
+        guard status == .bleHIDPPUnstable else { return }
+        LogiCenter.shared.showBLEHIDPPUnstableToast(forMosCode: event.code)
     }
 
     // 高亮已存在的行 (用于重复录制的视觉反馈)
@@ -240,6 +252,14 @@ extension PreferencesButtonsViewController {
         tableView.reloadData()
     }
 
+    func replaceButtonBinding(_ binding: ButtonBinding) {
+        guard buttonBindings.contains(where: { $0.id == binding.id }) else { return }
+        buttonBindings = ButtonBindingReplacement.replacing(binding, in: buttonBindings)
+        tableView.reloadData()
+        toggleNoDataHint()
+        syncViewWithOptions()
+    }
+
     private func presentOpenTargetPopover(forBindingID id: UUID) {
         guard let index = buttonBindings.firstIndex(where: { $0.id == id }) else { return }
         guard let row = tableView.row(forBinding: id, in: buttonBindings) else { return }
@@ -298,6 +318,9 @@ extension PreferencesButtonsViewController: NSTableViewDelegate, NSTableViewData
                 },
                 onDeleteRequested: { [weak self] in
                     self?.removeButtonBinding(id: binding.id)
+                },
+                onBindingUpdated: { [weak self] updated in
+                    self?.replaceButtonBinding(updated)
                 }
             )
             return cell
@@ -527,7 +550,7 @@ private extension NSTableView {
 // MARK: - EventRecorderDelegate
 extension PreferencesButtonsViewController: KeyRecorderDelegate {
     func validateRecordedEvent(_ recorder: KeyRecorder, event: InputEvent) -> Bool {
-        let recordedEvent = RecordedEvent(from: event)
+        let recordedEvent = normalizedRecordedEventForButtonBinding(from: event)
         return !buttonBindings.contains(where: { $0.triggerEvent == recordedEvent })
     }
 
@@ -535,5 +558,11 @@ extension PreferencesButtonsViewController: KeyRecorderDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.66) { [weak self] in
             self?.addRecordedEvent(event, isDuplicate: isDuplicate)
         }
+    }
+
+    private func normalizedRecordedEventForButtonBinding(from event: InputEvent) -> RecordedEvent {
+        let recordedEvent = RecordedEvent(from: event)
+        let diagnosis = LogiCenter.shared.buttonCaptureDiagnosis(forMosCode: event.code)
+        return recordedEvent.normalizedForButtonBinding(diagnosis: diagnosis)
     }
 }

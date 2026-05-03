@@ -36,4 +36,10 @@ final class LogiCIDDirectoryTests: XCTestCase {
         XCTAssertTrue(LogiCIDDirectory.isLogitechCode(1006))   // Back
         XCTAssertTrue(LogiCIDDirectory.isLogitechCode(3001))   // generic 2000 + 0x1001
     }
+
+    func testNativeMouseButtonCanMapBackToCID() {
+        XCTAssertEqual(LogiCIDDirectory.cid(forNativeMouseButton: 3), 0x0053)
+        XCTAssertEqual(LogiCIDDirectory.cid(forNativeMouseButton: 4), 0x0056)
+        XCTAssertNil(LogiCIDDirectory.cid(forNativeMouseButton: 8))
+    }
 }

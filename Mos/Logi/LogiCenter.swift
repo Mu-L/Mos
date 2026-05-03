@@ -62,10 +62,32 @@ final class LogiCenter {
         let displayName = LogiCIDDirectory.name(forMosCode: code)
         return displayName.isEmpty ? nil : displayName
     }
+    func nativeMouseButton(forMosCode code: UInt16) -> UInt16? {
+        let nativeButton = LogiCIDDirectory.nativeMouseButton(forMosCode: code)
+        #if DEBUG
+        LogiTrace.log("[Mapping] nativeMouseButton mosCode=\(code) -> \(nativeButton.map(String.init) ?? "nil")")
+        #endif
+        return nativeButton
+    }
 
     // MARK: - Conflict
+    func buttonCaptureDiagnosis(forMosCode code: UInt16) -> LogiButtonCaptureDiagnosis {
+        return manager.buttonCaptureDiagnosis(forMosCode: code)
+    }
     func conflictStatus(forMosCode code: UInt16) -> ConflictStatus {
         return manager.conflictStatus(forMosCode: code)
+    }
+    func isDeliveryContended(forMosCode code: UInt16) -> Bool {
+        return manager.deliveryMode(forMosCode: code) == .contended
+    }
+    func showBLEHIDPPUnstableToast(forMosCode code: UInt16) {
+        guard let cid = LogiCIDDirectory.toCID(code) else { return }
+        let controlName = LogiCIDDirectory.name(forCID: cid)
+        let message = String(
+            format: NSLocalizedString("logi_ble_hidpp_unstable_toast", comment: ""),
+            controlName
+        )
+        externalBridge.showLogiToast(message, severity: .warning)
     }
 
     // MARK: - Recording
@@ -88,12 +110,21 @@ final class LogiCenter {
         LogiDebugPanel.shared.show()
     }
 
+    func logButtonCaptureDiagnostic(_ message: String) {
+        #if DEBUG
+        LogiDebugPanel.log(device: "Button Capture", type: .buttonEvent, message: message)
+        #endif
+    }
+
     // MARK: - Activity
     var isBusy: Bool { manager.isBusy }
     var currentActivitySummary: [SessionActivityStatus] { manager.currentActivitySummary }
 
     // MARK: - Usage registry
     func setUsage(source: UsageSource, codes: Set<UInt16>) {
+        #if DEBUG
+        LogiTrace.log("[Center] setUsage source=\(source) codes=\(LogiTrace.codes(codes))")
+        #endif
         registry.setUsage(source: source, codes: codes)
     }
     func usages(of code: UInt16) -> [UsageSource] {

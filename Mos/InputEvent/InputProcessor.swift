@@ -35,7 +35,6 @@ class InputProcessor {
     }
 
     private struct ActiveBindingSession {
-        let triggerKey: TriggerKey
         let action: ResolvedAction
         let mouseSessionID: UUID?
         var mosScrollTapReplay: MosScrollTapReplay?
@@ -91,30 +90,20 @@ class InputProcessor {
     /// - Parameter event: 统一输入事件
     /// - Returns: .consumed 表示事件已处理, .passthrough 表示未匹配
     func process(_ event: InputEvent) -> InputResult {
-        let key = TriggerKey(type: event.type, code: event.code)
-
         if event.phase == .up {
             // Up 事件: 按 (type, code) 查表, 忽略 modifiers (用户可能已松开修饰键)
-            if let session = activeBindings.removeValue(forKey: key) {
-                ShortcutExecutor.shared.execute(
-                    action: session.action,
-                    phase: .up,
-                    mouseSessionID: session.mouseSessionID,
-                    inputModifiers: event.modifiers
-                )
-                if let tapReplay = session.mosScrollTapReplay,
-                   shouldReplayMosScrollTap(tapReplay, releaseEvent: event) {
-                    ShortcutExecutor.shared.replayMouseTap(tapReplay.context)
-                }
-                recomputeActiveModifierFlags()
+            if releaseActiveBinding(for: event) {
                 return .consumed
             }
             return .passthrough
         }
 
         // Down 事件: 完整匹配 (type + code + modifiers + deviceFilter)
-        guard let binding = ButtonUtils.shared.getBestMatchingBinding(for: event),
-              let action = ShortcutExecutor.shared.resolveAction(
+        let key = TriggerKey(type: event.type, code: event.code)
+        guard let binding = ButtonUtils.shared.getBestMatchingBinding(for: event) else {
+            return .passthrough
+        }
+        guard let action = ShortcutExecutor.shared.resolveAction(
                 named: binding.systemShortcutName,
                 binding: binding
               ) else {
@@ -137,13 +126,35 @@ class InputProcessor {
 
         let executionResult = ShortcutExecutor.shared.execute(action: action, phase: .down, inputModifiers: event.modifiers)
         activeBindings[key] = ActiveBindingSession(
-            triggerKey: key,
             action: action,
             mouseSessionID: executionResult.mouseSessionID,
             mosScrollTapReplay: mosScrollTapReplay(for: action, event: event)
         )
         recomputeActiveModifierFlags()
         return .consumed
+    }
+
+    private func releaseActiveBinding(for event: InputEvent) -> Bool {
+        let key = TriggerKey(type: event.type, code: event.code)
+        if let session = activeBindings.removeValue(forKey: key) {
+            release(session, with: event)
+            return true
+        }
+        return false
+    }
+
+    private func release(_ session: ActiveBindingSession, with event: InputEvent) {
+        ShortcutExecutor.shared.execute(
+            action: session.action,
+            phase: .up,
+            mouseSessionID: session.mouseSessionID,
+            inputModifiers: event.modifiers
+        )
+        if let tapReplay = session.mosScrollTapReplay,
+           shouldReplayMosScrollTap(tapReplay, releaseEvent: event) {
+            ShortcutExecutor.shared.replayMouseTap(tapReplay.context)
+        }
+        recomputeActiveModifierFlags()
     }
 
     /// 标记 Mos Scroll 会话已经被真实滚动使用; 后续 mouseUp 不再重放原始点击。

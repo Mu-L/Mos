@@ -1,7 +1,7 @@
 import XCTest
 @testable import Mos_Debug
 
-/// Regression: in v3 of the divert pipeline, the empty-controls branch in
+/// Regression: in v3 of the divert route, the empty-controls branch in
 /// LogiDeviceSession's reporting query terminal forgot to post
 /// reportingQueryDidCompleteNotification. The Self-Test Wizard's
 /// "wait reportingDidComplete" step would hang indefinitely on devices

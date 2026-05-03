@@ -27,6 +27,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private var conflictTrackingArea: NSTrackingArea?
     private var conflictPopover: NSPopover?
     private var currentTriggerCode: UInt16 = 0
+    private var currentCapturePresentationStatus: ButtonCapturePresentationStatus = .normal
     private var conflictObserverTokens: [NSObjectProtocol] = []
     private static let conflictIconSize: CGFloat = 14  // 图标绘制尺寸
     private static let conflictHitSize: CGFloat = 28   // hover 热区尺寸 (外扩以便好点中)
@@ -36,6 +37,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private var onShortcutSelected: ((SystemShortcut.Shortcut?) -> Void)?
     private var onDeleteRequested: (() -> Void)?
     private var onCustomShortcutRecorded: ((String) -> Void)?
+    private var onBindingUpdated: ((ButtonBinding) -> Void)?
     /// 当用户从 PopUpButton 菜单选择 "打开…" 时触发,
     /// 由 PreferencesButtonsViewController 弹出 OpenTargetConfigPopover.
     private var onOpenTargetSelectionRequested: (() -> Void)?
@@ -80,13 +82,15 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         onShortcutSelected: @escaping (SystemShortcut.Shortcut?) -> Void,
         onCustomShortcutRecorded: @escaping (String) -> Void,
         onOpenTargetSelectionRequested: @escaping () -> Void,
-        onDeleteRequested: @escaping () -> Void
+        onDeleteRequested: @escaping () -> Void,
+        onBindingUpdated: @escaping (ButtonBinding) -> Void = { _ in }
     ) {
         // 保存回调
         self.onShortcutSelected = onShortcutSelected
         self.onDeleteRequested = onDeleteRequested
         self.onCustomShortcutRecorded = onCustomShortcutRecorded
         self.onOpenTargetSelectionRequested = onOpenTargetSelectionRequested
+        self.onBindingUpdated = onBindingUpdated
         // 清理可能残留的录制状态 (cell 复用时)
         customRecorder.stopRecording()
         isCustomRecordingActive = false
@@ -143,6 +147,10 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     }
 
     private func refreshForAppearanceChange() {
+        if Thread.isMainThread {
+            refreshActionDisplayForAppearanceChange()
+            return
+        }
         DispatchQueue.main.async { [weak self] in
             self?.refreshActionDisplayForAppearanceChange()
         }
@@ -272,6 +280,7 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         }
         conflictIconView = nil
         conflictTrackingArea = nil
+        currentCapturePresentationStatus = .normal
 
         // 非 Logi 按键 -> 不显示
         guard currentTriggerCode > 0, LogiCenter.shared.isLogiCode(currentTriggerCode) else {
@@ -279,20 +288,27 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
             return
         }
 
-        let status = LogiCenter.shared.conflictStatus(forMosCode: currentTriggerCode)
-        guard status.isConflict else {
+        let status = capturePresentationStatus(forMosCode: currentTriggerCode)
+        currentCapturePresentationStatus = status
+        guard status.shouldShowIndicator else {
             setupDashedLine()
             return
         }
 
-        drawConflictIcon()
+        drawConflictIcon(status: status)
         setupDashedLine()
     }
 
-    private func drawConflictIcon() {
+    private func capturePresentationStatus(forMosCode code: UInt16) -> ButtonCapturePresentationStatus {
+        return ButtonCapturePresentationStatus.from(
+            LogiCenter.shared.buttonCaptureDiagnosis(forMosCode: code)
+        )
+    }
+
+    private func drawConflictIcon(status: ButtonCapturePresentationStatus) {
         guard let keyBox = keyDisplayContainerView.superview,
               let contentView = keyBox.superview else { return }
-        guard let iconImage = conflictIconImage() else { return }
+        guard let iconImage = conflictIconImage(for: status) else { return }
 
         let keyFrame = keyDisplayContainerView.convert(keyPreview.frame, to: contentView)
         let buttonFrame = actionPopUpButton.frame
@@ -300,7 +316,6 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         let startX = keyFrame.maxX + horizontalMargin
         let endX = buttonFrame.minX - horizontalMargin
         let hitSize = Self.conflictHitSize
-        let iconSize = Self.conflictIconSize
         let centerX = (startX + endX) / 2
         let centerY = contentView.bounds.height / 2
 
@@ -315,9 +330,9 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         imageView.imageAlignment = .alignCenter
         imageView.imageScaling = .scaleNone
         if #available(macOS 11.0, *) {
-            imageView.contentTintColor = NSColor.systemOrange
+            imageView.contentTintColor = iconTintColor(for: status)
         }
-        imageView.setAccessibilityLabel(NSLocalizedString("button_conflict_title", comment: ""))
+        imageView.setAccessibilityLabel(NSLocalizedString(status.titleKey, comment: ""))
 
         contentView.addSubview(imageView)
         conflictIconView = imageView
@@ -332,14 +347,41 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         conflictTrackingArea = area
     }
 
-    /// macOS 11+ 用 SF Symbol `arrow.triangle.branch` (橘色 tint, 14pt);
+    private func iconTintColor(for status: ButtonCapturePresentationStatus) -> NSColor {
+        switch status {
+        case .standardMouseAliasAvailable:
+            return NSColor.systemBlue
+        case .bleHIDPPUnstable:
+            return NSColor.systemOrange
+        case .normal, .conflict, .contended:
+            return NSColor.systemOrange
+        }
+    }
+
+    /// macOS 11+ 用 SF Symbol (14pt); 10.13~10.15 fallback 到系统 caution.
     /// 10.13~10.15 fallback 到系统 NSCaution (黄三角+感叹号, 内置色彩, 缩放到 14pt).
-    private func conflictIconImage() -> NSImage? {
+    private func conflictIconImage(for status: ButtonCapturePresentationStatus) -> NSImage? {
         let size = Self.conflictIconSize
         if #available(macOS 11.0, *) {
             let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-            return NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)?
-                .withSymbolConfiguration(config)
+            let symbolNames: [String]
+            switch status {
+            case .bleHIDPPUnstable:
+                symbolNames = [
+                    "antenna.radiowaves.left.and.right",
+                    "wifi.exclamationmark",
+                    "exclamationmark.triangle",
+                ]
+            case .normal, .conflict, .contended, .standardMouseAliasAvailable:
+                symbolNames = ["arrow.triangle.branch"]
+            }
+            for symbolName in symbolNames {
+                if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(config) {
+                    return image
+                }
+            }
+            return nil
         }
         guard let caution = NSImage(named: NSImage.cautionName) else { return nil }
         let scaled = NSImage(size: NSSize(width: size, height: size))
@@ -362,34 +404,42 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
             super.mouseExited(with: event)
             return
         }
+        guard !shouldKeepConflictPopoverOpenOnMouseExit else { return }
         hideConflictPopover()
     }
 
     private func showConflictPopover() {
         guard let anchor = conflictIconView, conflictPopover == nil else { return }
+        let status = currentCapturePresentationStatus
+        guard status.shouldShowIndicator else { return }
 
         let popover = NSPopover()
-        popover.behavior = .applicationDefined
+        popover.behavior = shouldKeepConflictPopoverOpenOnMouseExit ? .transient : .applicationDefined
         popover.animates = true
 
         let vc = NSViewController()
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleLabel = NSTextField(labelWithString: NSLocalizedString("button_conflict_title", comment: ""))
+        let titleLabel = NSTextField(labelWithString: NSLocalizedString(status.titleKey, comment: ""))
         titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
-        let detailLabel = NSTextField(wrappingLabelWithString: NSLocalizedString("button_conflict_detail", comment: ""))
+        let detailLabel = NSTextField(wrappingLabelWithString: NSLocalizedString(popoverDetailKey(for: status), comment: ""))
         detailLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         detailLabel.textColor = NSColor.secondaryLabelColor
         detailLabel.preferredMaxLayoutWidth = 280
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(detailLabel)
 
+        let actionStack = popoverActionStack(for: status)
+        if let actionStack {
+            container.addSubview(actionStack)
+        }
+
         let padding: CGFloat = 12
-        NSLayoutConstraint.activate([
+        var constraints: [NSLayoutConstraint] = [
             container.widthAnchor.constraint(equalToConstant: 300),
 
             titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: padding),
@@ -399,14 +449,83 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
             detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
             detailLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: padding),
             detailLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -padding),
-            detailLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding),
-        ])
+        ]
+
+        if let actionStack {
+            constraints += [
+                actionStack.topAnchor.constraint(equalTo: detailLabel.bottomAnchor, constant: 10),
+                actionStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: padding),
+                actionStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -padding),
+                actionStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding),
+            ]
+        } else {
+            constraints.append(detailLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding))
+        }
+        NSLayoutConstraint.activate(constraints)
 
         vc.view = container
         popover.contentViewController = vc
 
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         conflictPopover = popover
+    }
+
+    private func popoverActionStack(for status: ButtonCapturePresentationStatus) -> NSStackView? {
+        var buttons: [NSButton] = []
+        if status == .standardMouseAliasAvailable && hasStandardMouseAliasAction {
+            buttons.append(popoverButton(
+                titleKey: "button_use_native_mouse",
+                action: #selector(useStandardMouseAliasFromPopover)
+            ))
+        }
+
+        guard !buttons.isEmpty else { return nil }
+
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    private func popoverDetailKey(for status: ButtonCapturePresentationStatus) -> String {
+        return status.detailKey
+    }
+
+    private var hasStandardMouseAliasAction: Bool {
+        return currentBinding?.standardMouseAliasBindingIfAvailable() != nil
+    }
+
+    private var shouldKeepConflictPopoverOpenOnMouseExit: Bool {
+        return currentCapturePresentationStatus.keepsPopoverOpenOnMouseExit
+    }
+
+    private func popoverButton(titleKey: String, action: Selector) -> NSButton {
+        let button = NSButton(
+            title: NSLocalizedString(titleKey, comment: ""),
+            target: self,
+            action: action
+        )
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        return button
+    }
+
+    @objc private func useStandardMouseAliasFromPopover() {
+        guard let updated = currentBinding?.standardMouseAliasBindingIfAvailable() else { return }
+        LogiCenter.shared.logButtonCaptureDiagnostic(
+            "[StandardMouseAlias] converted binding id=\(updated.id) nativeButton=\(updated.triggerEvent.code)"
+        )
+        currentBinding = updated
+        currentTriggerCode = 0
+        currentCapturePresentationStatus = .normal
+        setupKeyDisplayView(with: updated.triggerEvent)
+        setupActionPopUpButton(showLogiActions: false)
+        onBindingUpdated?(updated)
+        hideConflictPopover()
+        refreshConflictIndicator()
     }
 
     private func hideConflictPopover() {
@@ -431,7 +550,14 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         ) { [weak self] _ in
             self?.refreshConflictIndicator()
         }
-        conflictObserverTokens = [sessionToken, reportingToken]
+        let conflictToken = center.addObserver(
+            forName: LogiCenter.conflictChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshConflictIndicator()
+        }
+        conflictObserverTokens = [sessionToken, reportingToken, conflictToken]
     }
 
     private func unregisterConflictObservers() {
