@@ -48,6 +48,8 @@ class KeyRecorder: NSObject {
 
     // MARK: - Constants
     static let TIMEOUT: TimeInterval = 10.0
+    private static let recordedFeedbackDelay: TimeInterval = 0.7
+    private static let duplicateFeedbackDelay: TimeInterval = 1.0
     static let FLAG_CHANGE_NOTI_NAME = NSNotification.Name("RECORD_FLAG_CHANGE_NOTI_NAME")
     static let FINISH_NOTI_NAME = NSNotification.Name("RECORD_FINISH_NOTI_NAME")
     static let CANCEL_NOTI_NAME = NSNotification.Name("RECORD_CANCEL_NOTI_NAME")
@@ -88,6 +90,11 @@ class KeyRecorder: NSObject {
         CGEventFlags.maskAlternate.rawValue |
         CGEventFlags.maskCommand.rawValue |
         CGEventFlags.maskSecondaryFn.rawValue
+
+    static func recordingFeedbackDelay(isDuplicate: Bool) -> TimeInterval {
+        return isDuplicate ? duplicateFeedbackDelay : recordedFeedbackDelay
+    }
+
     // UI 组件
     private var keyPopover: KeyPopover?
     
@@ -480,9 +487,12 @@ class KeyRecorder: NSObject {
 
         keyPopover?.keyPreview
             .update(from: mosEvent.displayComponents, status: status)
+        if isDuplicate {
+            keyPopover?.showDuplicateHint()
+        }
         self.delegate?.onEventRecorded(self, didRecordEvent: mosEvent, isDuplicate: isDuplicate)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recordingFeedbackDelay(isDuplicate: isDuplicate)) { [weak self] in
             self?.stopRecording()
         }
     }

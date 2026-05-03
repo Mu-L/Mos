@@ -555,7 +555,7 @@ extension PreferencesButtonsViewController: KeyRecorderDelegate {
     }
 
     func onEventRecorded(_ recorder: KeyRecorder, didRecordEvent event: InputEvent, isDuplicate: Bool) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.66) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyRecorder.recordingFeedbackDelay(isDuplicate: isDuplicate)) { [weak self] in
             self?.addRecordedEvent(event, isDuplicate: isDuplicate)
         }
     }

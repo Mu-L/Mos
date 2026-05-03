@@ -181,8 +181,6 @@ struct InputEvent {
             }
             return true
         case .mouse:
-            // 主鼠标键不允许录制 (左键、右键)
-            if KeyCode.mouseMainKeys.contains(code) { return false }
             return true
         }
     }

@@ -240,6 +240,39 @@ final class ButtonBindingTests: XCTestCase {
         )
     }
 
+    func testPrepareCustomCache_typedMouseBindingPreservesMouseType() {
+        var binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 5, modifiers: 0, displayComponents: ["🖱5"], deviceFilter: nil),
+            systemShortcutName: "custom::mouse:3:0"
+        )
+
+        binding.prepareCustomCache()
+
+        XCTAssertEqual(binding.cachedCustomType, .mouse)
+        XCTAssertEqual(binding.cachedCustomCode, 3)
+        XCTAssertEqual(binding.cachedCustomModifiers, 0)
+    }
+
+    func testPrepareCustomCache_legacyHighCodeBindingInfersMouseType() {
+        var binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 5, modifiers: 0, displayComponents: ["🖱5"], deviceFilter: nil),
+            systemShortcutName: "custom::1006:0"
+        )
+
+        binding.prepareCustomCache()
+
+        XCTAssertEqual(binding.cachedCustomType, .mouse)
+        XCTAssertEqual(binding.cachedCustomCode, 1006)
+        XCTAssertEqual(binding.cachedCustomModifiers, 0)
+    }
+
+    func testNormalizedCustomBindingName_encodesMouseType() {
+        XCTAssertEqual(
+            ButtonBinding.normalizedCustomBindingName(type: .mouse, code: 3, modifiers: 0),
+            "custom::mouse:3:0"
+        )
+    }
+
     func testInit_withCreatedAt_preservesTimestamp() {
         let pastDate = Date(timeIntervalSince1970: 1000000)
         let binding = ButtonBinding(
@@ -324,6 +357,13 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertNil(SystemShortcut.displayShortcut(matchingBindingName: "custom::65532:0"))
     }
 
+    func testDisplayShortcut_matchesTypedMouseBackCustomBinding() {
+        XCTAssertEqual(
+            SystemShortcut.displayShortcut(matchingBindingName: "custom::mouse:3:0")?.identifier,
+            "mouseBackClick"
+        )
+    }
+
     func testActionDisplayResolver_prioritizesRecordingPromptOverExistingShortcut() {
         let presentation = makeResolvedPresentation(
             shortcut: SystemShortcut.screenshotSelection,
@@ -344,6 +384,20 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(presentation.kind, .namedAction)
         XCTAssertEqual(presentation.title, SystemShortcut.screenshotSelection.localizedName)
         XCTAssertEqual(presentation.brand?.name, nil)
+    }
+
+    func testActionDisplayResolver_upgradesTypedMouseBackCustomBindingToNamedAction() {
+        let presentation = makeResolvedPresentation(customBindingName: "custom::mouse:3:0")
+
+        XCTAssertEqual(presentation.kind, .namedAction)
+        XCTAssertEqual(presentation.title, SystemShortcut.mouseBackClick.localizedName)
+    }
+
+    func testActionDisplayResolver_rendersTypedMouseCustomBindingAsMouseBadge() {
+        let presentation = makeResolvedPresentation(customBindingName: "custom::mouse:5:0")
+
+        XCTAssertEqual(presentation.kind, .keyCombo)
+        XCTAssertEqual(presentation.badgeComponents, ["🖱5"])
     }
 
     func testActionDisplayResolver_upgradesSingleLogiCustomBindingToBrandedNamedAction() {
@@ -937,6 +991,139 @@ final class ButtonBindingTests: XCTestCase {
 
         XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, SystemShortcut.screenshotSelection.localizedName)
         XCTAssertEqual(cell.actionPopUpButton.titleOfSelectedItem, SystemShortcut.screenshotSelection.localizedName)
+    }
+
+    func testRecordedMouseCustomShortcut_updatesSelectedActionDisplayToNamedMouseAction() {
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 5, modifiers: 0, displayComponents: ["🖱5"], deviceFilter: nil),
+            systemShortcutName: "",
+            isEnabled: false
+        )
+        let cell = makeButtonCell(binding: binding)
+        let event = InputEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        cell.onEventRecorded(KeyRecorder(), didRecordEvent: event, isDuplicate: false)
+        advanceMainRunLoop(by: 0.75)
+
+        XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, SystemShortcut.mouseBackClick.localizedName)
+        XCTAssertEqual(cell.actionPopUpButton.titleOfSelectedItem, SystemShortcut.mouseBackClick.localizedName)
+    }
+
+    func testPrimaryMouseButtonsAreRecordableOnlyInAdaptiveMode() {
+        for code in [UInt16(0), UInt16(1)] {
+            let event = InputEvent(
+                type: .mouse,
+                code: code,
+                modifiers: [],
+                phase: .down,
+                source: .hidPP,
+                device: nil
+            )
+
+            XCTAssertTrue(event.isRecordableAsAdaptive)
+            XCTAssertFalse(event.isRecordableAsSingleKey)
+            XCTAssertFalse(event.isRecordable)
+        }
+    }
+
+    func testKeyPopoverDuplicateHintUsesDedicatedTextAndEscHintStyle() {
+        let popover = KeyPopover()
+        popover.testingPrepareContent()
+
+        popover.showDuplicateHint()
+
+        XCTAssertEqual(
+            popover.testingHintText,
+            NSLocalizedString("button-recording-duplicate-hint", comment: "")
+        )
+        XCTAssertEqual(popover.testingHintFontPointSize, 10)
+        XCTAssertEqual(popover.testingHintAlignment, NSTextAlignment.center)
+        XCTAssertEqual(popover.testingHintBottomPadding, 5)
+
+        popover.hide()
+    }
+
+    func testKeyRecorderDuplicateFeedbackDelayIsLongerThanRecordedFeedback() {
+        XCTAssertEqual(KeyRecorder.recordingFeedbackDelay(isDuplicate: false), 0.7)
+        XCTAssertEqual(KeyRecorder.recordingFeedbackDelay(isDuplicate: true), 1.0)
+    }
+
+    func testCustomRecordingValidationRejectsRecordingTriggerItself() {
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱3"], deviceFilter: nil),
+            systemShortcutName: "",
+            isEnabled: false
+        )
+        let cell = makeButtonCell(binding: binding)
+        let event = InputEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        XCTAssertFalse(cell.validateRecordedEvent(KeyRecorder(), event: event))
+    }
+
+    func testDuplicateCustomRecordingRestoresPreviousActionDisplay() {
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱3"], deviceFilter: nil),
+            systemShortcutName: "",
+            isEnabled: false
+        )
+        let cell = makeButtonCell(binding: binding)
+        let event = InputEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        cell.beginCustomShortcutSelection(startRecorder: false)
+        flushMainQueue()
+        cell.onEventRecorded(KeyRecorder(), didRecordEvent: event, isDuplicate: true)
+        cell.onRecordingStopped(KeyRecorder(), didRecord: true)
+        advanceMainRunLoop(by: KeyRecorder.recordingFeedbackDelay(isDuplicate: true) + 0.05)
+
+        XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, NSLocalizedString("unbound", comment: ""))
+    }
+
+    func testDuplicateCustomRecordingKeepsPromptUntilDuplicateFeedbackEnds() {
+        let binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱3"], deviceFilter: nil),
+            systemShortcutName: "",
+            isEnabled: false
+        )
+        let cell = makeButtonCell(binding: binding)
+        let event = InputEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        cell.beginCustomShortcutSelection(startRecorder: false)
+        flushMainQueue()
+        cell.onEventRecorded(KeyRecorder(), didRecordEvent: event, isDuplicate: true)
+
+        advanceMainRunLoop(by: KeyRecorder.recordingFeedbackDelay(isDuplicate: false) + 0.05)
+        XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, NSLocalizedString("custom-recording-prompt", comment: ""))
+
+        advanceMainRunLoop(by: KeyRecorder.recordingFeedbackDelay(isDuplicate: true))
+        XCTAssertEqual(cell.actionPopUpButton.menu?.items.first?.title, NSLocalizedString("unbound", comment: ""))
     }
 
     // MARK: - OpenTarget extension

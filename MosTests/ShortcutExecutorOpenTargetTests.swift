@@ -56,6 +56,37 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
         XCTAssertEqual(modifiers, 1048576)
     }
 
+    func testResolveAction_typedMouseBackCustomBinding_usesNamedMouseButtonPath() {
+        var binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 5, modifiers: 0, displayComponents: ["🖱5"], deviceFilter: nil),
+            systemShortcutName: "custom::mouse:3:0"
+        )
+        binding.prepareCustomCache()
+        let executor = ShortcutExecutor()
+
+        let resolved = executor.resolveAction(named: "custom::mouse:3:0", binding: binding)
+        guard case .mouseButton(let kind) = resolved else {
+            return XCTFail("Expected .mouseButton case, got \(String(describing: resolved))")
+        }
+        XCTAssertEqual(kind, .back)
+    }
+
+    func testResolveAction_typedMouseCustomBinding_usesCustomMouseButtonPath() {
+        var binding = ButtonBinding(
+            triggerEvent: RecordedEvent(type: .mouse, code: 6, modifiers: 0, displayComponents: ["🖱6"], deviceFilter: nil),
+            systemShortcutName: "custom::mouse:5:0"
+        )
+        binding.prepareCustomCache()
+        let executor = ShortcutExecutor()
+
+        let resolved = executor.resolveAction(named: "custom::mouse:5:0", binding: binding)
+        guard case .customMouseButton(let buttonNumber, let modifiers) = resolved else {
+            return XCTFail("Expected .customMouseButton case, got \(String(describing: resolved))")
+        }
+        XCTAssertEqual(buttonNumber, 5)
+        XCTAssertEqual(modifiers, 0)
+    }
+
     func testResolveAction_existingMouseButtonPath_unaffected() {
         let executor = ShortcutExecutor()
         let resolved = executor.resolveAction(named: "mouseLeftClick", binding: nil)
@@ -73,6 +104,7 @@ final class ShortcutExecutorOpenTargetTests: XCTestCase {
 
     func testExecutionMode_existingCases_unchanged() {
         XCTAssertEqual(ResolvedAction.customKey(code: 0, modifiers: 0).executionMode, .stateful)
+        XCTAssertEqual(ResolvedAction.customMouseButton(buttonNumber: 5, modifiers: 0).executionMode, .stateful)
         XCTAssertEqual(ResolvedAction.mouseButton(kind: .left).executionMode, .stateful)
         XCTAssertEqual(ResolvedAction.logiAction(identifier: "logiSmartShiftToggle").executionMode, .trigger)
     }

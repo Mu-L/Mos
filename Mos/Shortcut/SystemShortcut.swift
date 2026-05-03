@@ -517,15 +517,37 @@ struct SystemShortcut {
         "modifierFn": KeyCode.fnL,
     ]
 
+    private static let predefinedMouseButtonCodes: [UInt16: String] = [
+        0: "mouseLeftClick",
+        1: "mouseRightClick",
+        2: "mouseMiddleClick",
+        3: "mouseBackClick",
+        4: "mouseForwardClick",
+    ]
+
     static func predefinedModifierCode(for identifier: String) -> UInt16? {
         predefinedModifierCodes[identifier]
     }
 
     static func predefinedModifierShortcut(matchingCustomBinding customBindingName: String) -> Shortcut? {
-        guard let (code, modifiers) = ButtonBinding.normalizedCustomBindingPayload(from: customBindingName), modifiers == 0 else {
+        guard let payload = ButtonBinding.normalizedCustomBindingDescriptor(from: customBindingName),
+              payload.type == .keyboard,
+              payload.modifiers == 0 else {
             return nil
         }
-        guard let identifier = predefinedModifierCodes.first(where: { $0.value == code })?.key else {
+        guard let identifier = predefinedModifierCodes.first(where: { $0.value == payload.code })?.key else {
+            return nil
+        }
+        return getShortcut(named: identifier)
+    }
+
+    static func predefinedMouseButtonShortcut(matchingCustomBinding customBindingName: String) -> Shortcut? {
+        guard let payload = ButtonBinding.normalizedCustomBindingDescriptor(from: customBindingName),
+              payload.type == .mouse,
+              payload.modifiers == 0 else {
+            return nil
+        }
+        guard let identifier = predefinedMouseButtonCodes[payload.code] else {
             return nil
         }
         return getShortcut(named: identifier)
@@ -536,17 +558,22 @@ struct SystemShortcut {
             return directShortcut
         }
 
+        if let mouseShortcut = predefinedMouseButtonShortcut(matchingCustomBinding: bindingName) {
+            return mouseShortcut
+        }
+
         if let modifierShortcut = predefinedModifierShortcut(matchingCustomBinding: bindingName) {
             return modifierShortcut
         }
 
-        guard let (code, modifiers) = ButtonBinding.normalizedCustomBindingPayload(from: bindingName) else {
+        guard let payload = ButtonBinding.normalizedCustomBindingDescriptor(from: bindingName),
+              payload.type == .keyboard else {
             return nil
         }
 
         let matchingShortcuts = allShortcuts.values.filter { shortcut in
-            shortcut.code == code &&
-            shortcut.modifiers.rawValue == modifiers &&
+            shortcut.code == payload.code &&
+            shortcut.modifiers.rawValue == payload.modifiers &&
             shortcut.code < 0xFFFC  // 0xFFFC... are pseudo actions, not recordable key equivalents
         }
 

@@ -31,6 +31,23 @@ enum MouseButtonActionKind {
             return nil
         }
     }
+
+    init?(buttonNumber: UInt16) {
+        switch buttonNumber {
+        case 0:
+            self = .left
+        case 1:
+            self = .right
+        case 2:
+            self = .middle
+        case 3:
+            self = .back
+        case 4:
+            self = .forward
+        default:
+            return nil
+        }
+    }
 }
 
 enum MosScrollActionKind {
@@ -65,6 +82,7 @@ enum MosScrollActionKind {
 
 enum ResolvedAction {
     case customKey(code: UInt16, modifiers: UInt64)
+    case customMouseButton(buttonNumber: UInt16, modifiers: UInt64)
     case mouseButton(kind: MouseButtonActionKind)
     case mosScroll(role: ScrollRole)
     case systemShortcut(identifier: String)
@@ -73,7 +91,7 @@ enum ResolvedAction {
 
     var executionMode: ActionExecutionMode {
         switch self {
-        case .customKey, .mouseButton, .mosScroll:
+        case .customKey, .customMouseButton, .mouseButton, .mosScroll:
             return .stateful
         case .logiAction, .openTarget:
             return .trigger
@@ -166,6 +184,15 @@ class ShortcutExecutor {
         case .customKey(let code, let modifiers):
             executeCustom(code: code, modifiers: modifiers, phase: phase)
             return .none
+        case .customMouseButton(let buttonNumber, let modifiers):
+            return ActionExecutionResult(
+                mouseSessionID: executeCustomMouseButton(
+                    buttonNumber: buttonNumber,
+                    modifiers: modifiers,
+                    phase: phase,
+                    mouseSessionID: mouseSessionID
+                )
+            )
         case .mouseButton(let kind):
             return ActionExecutionResult(
                 mouseSessionID: executeMouseButton(
@@ -201,7 +228,20 @@ class ShortcutExecutor {
         }
         if let code = binding?.cachedCustomCode {
             let modifiers = binding?.cachedCustomModifiers ?? 0
-            return .customKey(code: code, modifiers: modifiers)
+            switch binding?.cachedCustomType ?? .keyboard {
+            case .keyboard:
+                return .customKey(code: code, modifiers: modifiers)
+            case .mouse:
+                if let kind = MouseButtonActionKind(buttonNumber: code), modifiers == 0 {
+                    return .mouseButton(kind: kind)
+                }
+                if let nativeCode = LogiStandardMouseButtonAlias.nativeButtonCode(forMosCode: code),
+                   let kind = MouseButtonActionKind(buttonNumber: nativeCode),
+                   modifiers == 0 {
+                    return .mouseButton(kind: kind)
+                }
+                return .customMouseButton(buttonNumber: code, modifiers: modifiers)
+            }
         }
         if let code = SystemShortcut.predefinedModifierCode(for: shortcutName) {
             return .customKey(code: code, modifiers: 0)
@@ -265,6 +305,45 @@ class ShortcutExecutor {
             event.setIntegerValueField(.eventSourceUserData, value: MosEventMarker.syntheticCustom)
             event.post(tap: .cghidEventTap)
         }
+    }
+
+    private func executeCustomMouseButton(
+        buttonNumber: UInt16,
+        modifiers: UInt64,
+        phase: InputPhase,
+        mouseSessionID: UUID?
+    ) -> UUID? {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return nil }
+        let number = Int64(buttonNumber)
+        let spec = mouseEventSpec(buttonNumber: number, phase: phase)
+        guard let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: spec.type,
+            mouseCursorPosition: currentMouseLocationForCGEvent(),
+            mouseButton: spec.button
+        ) else {
+            return nil
+        }
+
+        let createdSessionID: UUID?
+        if phase == .down {
+            createdSessionID = MouseInteractionSessionController.shared.beginSession(target: syntheticTarget(buttonNumber: number))
+        } else {
+            createdSessionID = nil
+            if let mouseSessionID {
+                MouseInteractionSessionController.shared.endSession(id: mouseSessionID)
+            } else {
+                MouseInteractionSessionController.shared.clearAllSessions()
+            }
+        }
+
+        if let buttonNumber = spec.buttonNumber {
+            event.setIntegerValueField(.mouseEventButtonNumber, value: buttonNumber)
+        }
+        event.flags = CGEventFlags(rawValue: modifiers)
+        event.setIntegerValueField(.eventSourceUserData, value: MosEventMarker.syntheticCustom)
+        notifyOrPostMouseEvent(event)
+        return createdSessionID
     }
 
     // MARK: - Mouse Actions
@@ -355,6 +434,17 @@ class ShortcutExecutor {
             return .other(buttonNumber: 3)
         case .forward:
             return .other(buttonNumber: 4)
+        }
+    }
+
+    private func syntheticTarget(buttonNumber: Int64) -> SyntheticMouseTarget {
+        switch buttonNumber {
+        case 0:
+            return .left
+        case 1:
+            return .right
+        default:
+            return .other(buttonNumber: buttonNumber)
         }
     }
 

@@ -181,12 +181,15 @@ struct ActionDisplayResolver {
     }
 
     private func customBindingPresentation(for customBindingName: String) -> ActionPresentation? {
-        guard let (code, modifiers) = ButtonBinding.normalizedCustomBindingPayload(from: customBindingName) else {
+        guard let payload = ButtonBinding.normalizedCustomBindingDescriptor(from: customBindingName) else {
             return nil
         }
+        let type = payload.type
+        let code = payload.code
+        let modifiers = payload.modifiers
 
         let tag = BrandTag.tagForCode(code)
-        if let tag, modifiers == 0, LogiCenter.shared.isLogiCode(code) {
+        if type == .mouse, let tag, modifiers == 0, LogiCenter.shared.isLogiCode(code) {
             return ActionPresentation(
                 kind: .namedAction,
                 title: (LogiCenter.shared.name(forMosCode: code) ?? ""),
@@ -195,7 +198,7 @@ struct ActionDisplayResolver {
         }
 
         let event = InputEvent(
-            type: inputType(for: code),
+            type: type,
             code: code,
             modifiers: CGEventFlags(rawValue: modifiers),
             phase: .down,
@@ -214,13 +217,6 @@ struct ActionDisplayResolver {
             badgeComponents: badgeComponents,
             tag: tag
         )
-    }
-
-    private func inputType(for code: UInt16) -> EventType {
-        if KeyCode.modifierKeys.contains(code) {
-            return .keyboard
-        }
-        return code >= 0x100 ? .mouse : .keyboard
     }
 }
 

@@ -784,26 +784,26 @@ extension ButtonTableCellView: KeyRecorderDelegate {
     }
 
     func onEventRecorded(_ recorder: KeyRecorder, didRecordEvent event: InputEvent, isDuplicate: Bool) {
-        guard !isDuplicate else { return }
-        let customName = ButtonBinding.normalizedCustomBindingName(
-            code: event.code,
-            modifiers: UInt64(event.modifiers.rawValue)
-        )
+        guard !isDuplicate else {
+            restoreDisplayAfterRejectedCustomRecording()
+            return
+        }
+        let actionName = bindingNameForRecordedCustomAction(event)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.66) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyRecorder.recordingFeedbackDelay(isDuplicate: false)) { [weak self] in
             guard let self = self else { return }
             self.isCustomRecordingActive = false
             self.applyLocalBindingChange { old in
                 ButtonBinding(
                     id: old.id,
                     triggerEvent: old.triggerEvent,
-                    systemShortcutName: customName,
+                    systemShortcutName: actionName,
                     isEnabled: true,
                     createdAt: old.createdAt
                 )
             }
             self.refreshActionDisplay()
-            self.onCustomShortcutRecorded?(customName)
+            self.onCustomShortcutRecorded?(actionName)
             // 重绘虚线和冲突指示器
             DispatchQueue.main.async {
                 self.refreshConflictIndicator()
@@ -812,6 +812,36 @@ extension ButtonTableCellView: KeyRecorderDelegate {
     }
 
     func validateRecordedEvent(_ recorder: KeyRecorder, event: InputEvent) -> Bool {
-        return true
+        guard let binding = currentBinding else { return true }
+        return !isRecordingTriggerItself(event, trigger: binding.triggerEvent)
+    }
+
+    private func restoreDisplayAfterRejectedCustomRecording() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyRecorder.recordingFeedbackDelay(isDuplicate: true)) { [weak self] in
+            guard let self = self else { return }
+            self.isCustomRecordingActive = false
+            self.refreshActionDisplay()
+            DispatchQueue.main.async {
+                self.refreshConflictIndicator()
+            }
+        }
+    }
+
+    private func bindingNameForRecordedCustomAction(_ event: InputEvent) -> String {
+        let customName = ButtonBinding.normalizedCustomBindingName(from: event)
+        if let shortcut = SystemShortcut.displayShortcut(matchingBindingName: customName) {
+            return shortcut.identifier
+        }
+        return customName
+    }
+
+    private func isRecordingTriggerItself(_ event: InputEvent, trigger: RecordedEvent) -> Bool {
+        let recorded = normalizedSelfComparisonEvent(from: RecordedEvent(from: event))
+        let normalizedTrigger = normalizedSelfComparisonEvent(from: trigger)
+        return recorded == normalizedTrigger
+    }
+
+    private func normalizedSelfComparisonEvent(from event: RecordedEvent) -> RecordedEvent {
+        return event.standardMouseAliasTriggerIfAvailable() ?? event
     }
 }

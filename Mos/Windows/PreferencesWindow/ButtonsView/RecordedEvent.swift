@@ -243,7 +243,7 @@ struct ButtonBinding: Codable, Equatable {
     let triggerEvent: RecordedEvent
 
     /// 绑定的系统快捷键名称
-    /// 自定义快捷键格式: "custom::<keyCode>:<modifierFlags>"
+    /// 自定义快捷键格式: "custom::<keyCode>:<modifierFlags>" 或 "custom::mouse:<buttonCode>:<modifierFlags>"
     /// "打开应用" 动作: "openTarget" (此时 openTarget 字段非 nil)
     let systemShortcutName: String
 
@@ -263,6 +263,9 @@ struct ButtonBinding: Codable, Equatable {
 
     /// 缓存的自定义修饰键标志
     private(set) var cachedCustomModifiers: UInt64? = nil
+
+    /// 缓存的自定义输入类型; 旧格式按 code 推断, 与展示和执行路径保持一致.
+    private(set) var cachedCustomType: EventType? = nil
 
     // MARK: - CodingKeys (仅编码持久化字段)
 
@@ -372,38 +375,88 @@ struct ButtonBinding: Codable, Equatable {
 
     /// 解析 custom:: 格式并填充缓存字段
     mutating func prepareCustomCache() {
-        guard let payload = Self.normalizedCustomBindingPayload(from: systemShortcutName) else {
+        guard let payload = Self.normalizedCustomBindingDescriptor(from: systemShortcutName) else {
             cachedCustomCode = nil
             cachedCustomModifiers = nil
+            cachedCustomType = nil
             return
         }
         cachedCustomCode = payload.code
         cachedCustomModifiers = payload.modifiers
+        cachedCustomType = payload.type
     }
 
     static func normalizedCustomBindingName(code: UInt16, modifiers: UInt64) -> String {
-        let payload = normalizeCustomBindingPayload(code: code, modifiers: modifiers)
+        let payload = normalizeCustomBindingPayload(type: .keyboard, code: code, modifiers: modifiers)
         return "custom::\(payload.code):\(payload.modifiers)"
     }
 
+    static func normalizedCustomBindingName(type: EventType, code: UInt16, modifiers: UInt64) -> String {
+        let payload = normalizeCustomBindingPayload(type: type, code: code, modifiers: modifiers)
+        switch payload.type {
+        case .keyboard:
+            return "custom::\(payload.code):\(payload.modifiers)"
+        case .mouse:
+            return "custom::mouse:\(payload.code):\(payload.modifiers)"
+        }
+    }
+
+    static func normalizedCustomBindingName(from event: InputEvent) -> String {
+        return normalizedCustomBindingName(
+            type: event.type,
+            code: event.code,
+            modifiers: UInt64(event.modifiers.rawValue)
+        )
+    }
+
     static func normalizedCustomBindingPayload(from customBindingName: String) -> (code: UInt16, modifiers: UInt64)? {
+        guard let payload = normalizedCustomBindingDescriptor(from: customBindingName) else { return nil }
+        return (payload.code, payload.modifiers)
+    }
+
+    static func normalizedCustomBindingDescriptor(from customBindingName: String) -> (type: EventType, code: UInt16, modifiers: UInt64)? {
+        guard let payload = customBindingPayload(from: customBindingName) else { return nil }
+        let inferredType = payload.explicitType ?? legacyCustomBindingType(forCode: payload.code)
+        return (inferredType, payload.code, payload.modifiers)
+    }
+
+    private static func customBindingPayload(from customBindingName: String) -> (explicitType: EventType?, code: UInt16, modifiers: UInt64)? {
         guard customBindingName.hasPrefix("custom::") else { return nil }
         let payload = String(customBindingName.dropFirst("custom::".count))
         let parts = payload.split(separator: ":")
-        guard parts.count == 2,
-              let code = UInt16(parts[0]),
-              let modifiers = UInt64(parts[1]) else {
+
+        if parts.count == 2,
+           let code = UInt16(parts[0]),
+           let modifiers = UInt64(parts[1]) {
+            let normalized = normalizeCustomBindingPayload(type: .keyboard, code: code, modifiers: modifiers)
+            return (nil, normalized.code, normalized.modifiers)
+        }
+
+        guard parts.count == 3,
+              let type = EventType(rawValue: String(parts[0])),
+              let code = UInt16(parts[1]),
+              let modifiers = UInt64(parts[2]) else {
             return nil
         }
-        return normalizeCustomBindingPayload(code: code, modifiers: modifiers)
+        let normalized = normalizeCustomBindingPayload(type: type, code: code, modifiers: modifiers)
+        return (normalized.type, normalized.code, normalized.modifiers)
     }
 
     static func normalizeCustomBindingPayload(code: UInt16, modifiers: UInt64) -> (code: UInt16, modifiers: UInt64) {
+        let payload = normalizeCustomBindingPayload(type: .keyboard, code: code, modifiers: modifiers)
+        return (payload.code, payload.modifiers)
+    }
+
+    static func normalizeCustomBindingPayload(type: EventType, code: UInt16, modifiers: UInt64) -> (type: EventType, code: UInt16, modifiers: UInt64) {
         var normalizedModifiers = modifiers & customBindingRelevantModifierMask
-        if KeyCode.modifierKeys.contains(code) {
+        if type == .keyboard && KeyCode.modifierKeys.contains(code) {
             normalizedModifiers &= ~KeyCode.getKeyMask(code).rawValue
         }
-        return (code, normalizedModifiers)
+        return (type, code, normalizedModifiers)
+    }
+
+    private static func legacyCustomBindingType(forCode code: UInt16) -> EventType {
+        return code >= 0x100 ? .mouse : .keyboard
     }
 
     // MARK: - Equatable (仅比较持久化字段, 忽略瞬态缓存)

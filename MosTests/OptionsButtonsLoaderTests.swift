@@ -3,6 +3,17 @@ import XCTest
 
 final class OptionsButtonsLoaderTests: XCTestCase {
 
+    private func makeBinding() -> ButtonBinding {
+        let trigger = RecordedEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: 0,
+            displayComponents: ["Mouse 4"],
+            deviceFilter: nil
+        )
+        return ButtonBinding(triggerEvent: trigger, systemShortcutName: "copy", isEnabled: true)
+    }
+
     private func makeBindingJSON(
         id: String = "11111111-1111-1111-1111-111111111111",
         systemShortcutName: String = "copy",
@@ -135,5 +146,29 @@ final class OptionsButtonsLoaderTests: XCTestCase {
         XCTAssertEqual(result2.bindings.count, 1)
         XCTAssertEqual(result2.bindings.first?.systemShortcutName, "copy")
         XCTAssertEqual(result2.unknownElements.count, 1, "未来版本 binding 必须 round-trip 保持")
+    }
+
+    // MARK: - Test isolation
+
+    func testSaveOptionsDoesNotPersistButtonBindingsWhileRunningTests() {
+        let defaults = UserDefaults.standard
+        let key = OptionItem.Button.Bindings
+        let originalValue = defaults.object(forKey: key)
+        let sentinel = "test-sentinel".data(using: .utf8)!
+        let originalBindings = Options.shared.buttons
+
+        defaults.set(sentinel, forKey: key)
+        defer {
+            Options.shared.buttons = originalBindings
+            if let originalValue {
+                defaults.set(originalValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        Options.shared.buttons.binding = [makeBinding()]
+
+        XCTAssertEqual(defaults.data(forKey: key), sentinel)
     }
 }
