@@ -171,4 +171,26 @@ final class OptionsButtonsLoaderTests: XCTestCase {
 
         XCTAssertEqual(defaults.data(forKey: key), sentinel)
     }
+
+    func testAppRuntimeDetectsXCTestEnvironment() {
+        XCTAssertTrue(AppRuntime.isRunningXCTest(environment: [
+            "XCTestConfigurationFilePath": "/tmp/MosTests.xctestconfiguration"
+        ]))
+        XCTAssertTrue(AppRuntime.isRunningXCTest(environment: [
+            "XCTestBundlePath": "/tmp/MosTests.xctest"
+        ]))
+        XCTAssertFalse(AppRuntime.isRunningXCTest(environment: [:]))
+    }
+
+    func testAppRuntimeSkipsStartupSideEffectsDuringTestsUnlessExplicitlyEnabled() {
+        let testEnvironment = [
+            "XCTestConfigurationFilePath": "/tmp/MosTests.xctestconfiguration"
+        ]
+        XCTAssertFalse(AppRuntime.shouldRunAppStartupSideEffects(environment: testEnvironment))
+        XCTAssertTrue(AppRuntime.shouldRunAppStartupSideEffects(environment: [
+            "XCTestConfigurationFilePath": "/tmp/MosTests.xctestconfiguration",
+            "MOS_TEST_ENABLE_APP_STARTUP": "1"
+        ]))
+        XCTAssertTrue(AppRuntime.shouldRunAppStartupSideEffects(environment: [:]))
+    }
 }

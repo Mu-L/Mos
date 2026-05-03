@@ -146,6 +146,8 @@ extension Options {
     
     // 写入到 UserDefaults
     func saveOptions() {
+        guard !AppRuntime.isRunningXCTest else { return }
+
         if !readingOptionsLock {
             // 标识配置项存在
             UserDefaults.standard.set("optionsExist", forKey: OptionItem.General.OptionsExist)

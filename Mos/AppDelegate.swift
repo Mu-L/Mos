@@ -8,6 +8,39 @@
 
 import Cocoa
 
+enum AppRuntime {
+    static var isRunningXCTest: Bool {
+        isRunningXCTest(environment: ProcessInfo.processInfo.environment) || isXCTestLoaded
+    }
+
+    static func isRunningXCTest(environment: [String: String]) -> Bool {
+        environment["XCTestConfigurationFilePath"] != nil ||
+        environment["XCTestBundlePath"] != nil ||
+        environment.keys.contains { $0.hasPrefix("XCTest") }
+    }
+
+    static var shouldRunAppStartupSideEffects: Bool {
+        shouldRunAppStartupSideEffects(
+            environment: ProcessInfo.processInfo.environment,
+            isXCTestLoaded: isXCTestLoaded
+        )
+    }
+
+    static func shouldRunAppStartupSideEffects(
+        environment: [String: String],
+        isXCTestLoaded: Bool = false
+    ) -> Bool {
+        let isRunningTests = isRunningXCTest(environment: environment) || isXCTestLoaded
+        guard isRunningTests else { return true }
+        return environment["MOS_TEST_ENABLE_APP_STARTUP"] == "1"
+    }
+
+    private static var isXCTestLoaded: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+        NSClassFromString("XCTest.XCTestCase") != nil
+    }
+}
+
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
     // 防抖定时器: 显示器参数变化通知
@@ -23,6 +56,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 加载 libViewDebuggerSupport 时找不到符号 → dyld halt. Mos 自身进程已加载完
         // 依赖, unsetenv 不影响自身, 只让之后启动的子进程拿到干净 env.
         ShortcutExecutor.sanitizeOwnLaunchEnvironment()
+
+        guard AppRuntime.shouldRunAppStartupSideEffects else {
+            NSLog("Running under XCTest; skipping app startup side effects")
+            return
+        }
 
         // 禁止重复运行, 结束正在运行的实例
         Utils.preventMultiRunning(killExist: true)
@@ -84,6 +122,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     // 运行后启动滚动处理
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        guard AppRuntime.shouldRunAppStartupSideEffects else { return }
         LogiCenter.shared.installBridge(LogiIntegrationBridge.shared)
         LogiUsageBootstrap.refreshAll()
         startWithAccessibilityPermissionsChecker(nil)
@@ -103,6 +142,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 关闭前停止滚动处理
     func applicationWillTerminate(_ aNotification: Notification) {
+        guard AppRuntime.shouldRunAppStartupSideEffects else { return }
         LogiCenter.shared.stop()
         ScrollCore.shared.disable()
         ButtonCore.shared.disable()
