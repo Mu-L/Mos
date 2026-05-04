@@ -17,6 +17,14 @@ Full release pipeline: bump version → build → sign → notarize → package 
 | Signing key | macOS Keychain — Apple Developer ID (code signing) + Sparkle EdDSA (appcast) |
 | Notarization | macOS Keychain profile `notarytool` (stores Apple ID + app-specific password) |
 
+## Non-Negotiable Release Gates
+
+- `CURRENT_PROJECT_VERSION` is a release-blocking field, not an optional cleanup item. If the user asks to prepare a release and the channel/version are known or inferable, bump the build before archive/sign/notarize/package work.
+- Every release artifact must use a unique `CURRENT_PROJECT_VERSION` in `YYYYMMDD.N` format. Sparkle compares this value as `sparkle:version`; reusing an older build number can make the new update invisible to users.
+- The build must change even when `MARKETING_VERSION` stays the same, including hotfixes, re-runs, and same-version releases.
+- Choose the build from the release date (`YYYYMMDD.1` by default); if another release/build already uses that value, increment `.N`.
+- After editing, verify both `CURRENT_PROJECT_VERSION` occurrences in `Mos.xcodeproj/project.pbxproj` match. Do not phrase this step to the user as optional.
+
 ## Flow
 
 ```dot
@@ -40,7 +48,8 @@ digraph release {
 1. **Bump version** in `Mos.xcodeproj/project.pbxproj`:
    - `MARKETING_VERSION` — e.g., `4.0.2` (appears twice, use `replace_all`)
    - `CURRENT_PROJECT_VERSION` — build number in `YYYYMMDD.N` format (appears twice, use `replace_all`).
-     **CRITICAL**: Every release MUST have a unique `CURRENT_PROJECT_VERSION`. Sparkle uses this value (`sparkle:version`) to detect updates — if two releases share the same build number, users on the older version will never see the update. Always bump this even for hotfix releases.
+     **CRITICAL**: Every release MUST have a unique `CURRENT_PROJECT_VERSION`. Sparkle uses this value (`sparkle:version`) to detect updates — if two releases share the same build number, users on the older version will never see the update. Always bump this even for hotfix releases, and treat a stale/unchanged build as a blocker before archive.
+   - Verify the project now contains exactly two matching `CURRENT_PROJECT_VERSION` values and the intended `MARKETING_VERSION`.
    - Commit the version bump.
 
 2. **Archive**:
