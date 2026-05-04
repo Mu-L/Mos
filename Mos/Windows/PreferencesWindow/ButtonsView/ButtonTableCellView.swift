@@ -26,6 +26,13 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     private var conflictIconView: NSImageView?
     private var conflictTrackingArea: NSTrackingArea?
     private var conflictPopover: NSPopover?
+    private lazy var conflictPopoverController: HoverIntentPopoverController = {
+        let controller = HoverIntentPopoverController()
+        controller.onDidClose = { [weak self] in
+            self?.conflictPopover = nil
+        }
+        return controller
+    }()
     private var currentTriggerCode: UInt16 = 0
     private var currentCapturePresentationStatus: ButtonCapturePresentationStatus = .normal
     private var conflictObserverTokens: [NSObjectProtocol] = []
@@ -404,7 +411,10 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
             super.mouseExited(with: event)
             return
         }
-        guard !shouldKeepConflictPopoverOpenOnMouseExit else { return }
+        guard !shouldKeepConflictPopoverOpenOnMouseExit else {
+            conflictPopoverController.sourceMouseExited()
+            return
+        }
         hideConflictPopover()
     }
 
@@ -466,8 +476,8 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
         vc.view = container
         popover.contentViewController = vc
 
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-        conflictPopover = popover
+        installConflictPopover(popover)
+        conflictPopoverController.show(popover, relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     private func popoverActionStack(for status: ButtonCapturePresentationStatus) -> NSStackView? {
@@ -529,8 +539,12 @@ class ButtonTableCellView: NSTableCellView, NSMenuDelegate {
     }
 
     private func hideConflictPopover() {
-        conflictPopover?.close()
+        conflictPopoverController.close()
         conflictPopover = nil
+    }
+
+    private func installConflictPopover(_ popover: NSPopover) {
+        conflictPopover = popover
     }
 
     private func registerConflictObservers() {

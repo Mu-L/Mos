@@ -59,6 +59,62 @@ final class ButtonBindingTests: XCTestCase {
         return actionButton
     }
 
+    func testHoverIntentPopoverControllerHandlesCloseCallback() {
+        let controller = HoverIntentPopoverController()
+
+        XCTAssertTrue(controller is NSPopoverDelegate)
+        XCTAssertTrue(controller.responds(to: #selector(NSPopoverDelegate.popoverDidClose(_:))))
+    }
+
+    func testHoverIntentPopoverCloseCallbackClearsStoredPopoverReference() {
+        let controller = HoverIntentPopoverController()
+        let popover = NSPopover()
+
+        controller.testingInstallPopover(popover)
+        XCTAssertTrue((popover.delegate as AnyObject?) === controller)
+        XCTAssertTrue(controller.testingHasPopover)
+
+        controller.popoverDidClose(Notification(name: NSPopover.didCloseNotification, object: popover))
+
+        XCTAssertFalse(controller.testingHasPopover)
+    }
+
+    func testHoverIntentGeometryKeepsPointerInsideVerticalCorridor() {
+        let source = NSRect(x: 100, y: 100, width: 28, height: 28)
+        let popover = NSRect(x: 60, y: 170, width: 140, height: 90)
+
+        XCTAssertTrue(HoverIntentPopoverGeometry.shouldKeepOpen(
+            pointer: NSPoint(x: 116, y: 150),
+            sourceFrame: source,
+            popoverFrame: popover,
+            corridorPadding: 10
+        ))
+    }
+
+    func testHoverIntentGeometryClosesWhenPointerLeavesCorridor() {
+        let source = NSRect(x: 100, y: 100, width: 28, height: 28)
+        let popover = NSRect(x: 60, y: 170, width: 140, height: 90)
+
+        XCTAssertFalse(HoverIntentPopoverGeometry.shouldKeepOpen(
+            pointer: NSPoint(x: 225, y: 150),
+            sourceFrame: source,
+            popoverFrame: popover,
+            corridorPadding: 10
+        ))
+    }
+
+    func testHoverIntentGeometryKeepsPointerInsidePopoverFrame() {
+        let source = NSRect(x: 100, y: 100, width: 28, height: 28)
+        let popover = NSRect(x: 60, y: 170, width: 140, height: 90)
+
+        XCTAssertTrue(HoverIntentPopoverGeometry.shouldKeepOpen(
+            pointer: NSPoint(x: 120, y: 210),
+            sourceFrame: source,
+            popoverFrame: popover,
+            corridorPadding: 10
+        ))
+    }
+
     private func opaqueBounds(in image: NSImage) -> NSRect? {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
