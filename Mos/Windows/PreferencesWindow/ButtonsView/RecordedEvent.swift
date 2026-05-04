@@ -99,7 +99,6 @@ struct RecordedEvent: Codable, Equatable {
     let type: EventType // 事件类型
     let code: UInt16 // 按键代码
     let modifiers: UInt // 修饰键
-    let displayComponents: [String] // 展示用名称组件
     let deviceFilter: DeviceFilter?
 
     // MARK: - 计算属性
@@ -114,6 +113,19 @@ struct RecordedEvent: Codable, Equatable {
         return ScrollHotkey(type: type, code: code)
     }
 
+    /// 展示用名称组件按当前命名规则动态计算, 不写入持久化配置.
+    var displayComponents: [String] {
+        let event = InputEvent(
+            type: type,
+            code: code,
+            modifiers: CGEventFlags(rawValue: UInt64(modifiers)),
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+        return event.displayComponents
+    }
+
     // MARK: - INIT
     init(from event: CGEvent) {
         // 修饰键
@@ -126,8 +138,6 @@ struct RecordedEvent: Codable, Equatable {
             self.type = .mouse
             self.code = event.mouseCode
         }
-        // 展示用名称
-        self.displayComponents = event.displayComponents
         self.deviceFilter = nil
     }
 
@@ -137,15 +147,21 @@ struct RecordedEvent: Codable, Equatable {
         self.code = event.code
         self.modifiers = UInt(event.modifiers.rawValue)
         self.deviceFilter = deviceFilter
-        self.displayComponents = event.displayComponents
     }
 
-    /// 便捷构造 - 直接指定所有字段
+    /// 便捷构造 - 直接指定事件字段
+    init(type: EventType, code: UInt16, modifiers: UInt, deviceFilter: DeviceFilter?) {
+        self.type = type
+        self.code = code
+        self.modifiers = modifiers
+        self.deviceFilter = deviceFilter
+    }
+
+    /// 兼容旧调用点: displayComponents 已改为动态计算, 这里不再存储传入值.
     init(type: EventType, code: UInt16, modifiers: UInt, displayComponents: [String], deviceFilter: DeviceFilter?) {
         self.type = type
         self.code = code
         self.modifiers = modifiers
-        self.displayComponents = displayComponents
         self.deviceFilter = deviceFilter
     }
 

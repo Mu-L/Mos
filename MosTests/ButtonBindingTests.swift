@@ -400,6 +400,82 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(presentation.badgeComponents, ["🖱5"])
     }
 
+    func testInputEventUsesSemanticNamesForStandardMouseBackAndForwardButtons() {
+        let back = InputEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+        let forward = InputEvent(
+            type: .mouse,
+            code: 4,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+
+        XCTAssertEqual(back.displayComponents, ["🖱️ Back Button"])
+        XCTAssertEqual(forward.displayComponents, ["🖱️ Forward Button"])
+    }
+
+    func testRecordedEventDisplayComponentsRefreshLegacyStandardMouseButtonNames() {
+        let back = RecordedEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: 0,
+            displayComponents: ["🖱4"],
+            deviceFilter: nil
+        )
+        let forward = RecordedEvent(
+            type: .mouse,
+            code: 4,
+            modifiers: UInt(CGEventFlags.maskShift.rawValue),
+            displayComponents: ["⇧", "🖱5"],
+            deviceFilter: nil
+        )
+
+        XCTAssertEqual(back.displayComponents, ["🖱️ Back Button"])
+        XCTAssertEqual(forward.displayComponents, ["⇧", "🖱️ Forward Button"])
+    }
+
+    func testRecordedEventDecodesLegacyDisplayComponentsButIgnoresStoredPresentation() throws {
+        let modifiers = UInt(CGEventFlags.maskShift.rawValue)
+        let json = """
+        {
+            "type": "mouse",
+            "code": 3,
+            "modifiers": \(modifiers),
+            "displayComponents": ["Legacy Back"],
+            "deviceFilter": null
+        }
+        """
+
+        let event = try JSONDecoder().decode(RecordedEvent.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(event.displayComponents, ["⇧", "🖱️ Back Button"])
+    }
+
+    func testRecordedEventEncodingOmitsDisplayComponents() throws {
+        let event = RecordedEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: 0,
+            displayComponents: ["Legacy Back"],
+            deviceFilter: nil
+        )
+
+        let data = try JSONEncoder().encode(event)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertNil(object["displayComponents"])
+        XCTAssertEqual(object["type"] as? String, "mouse")
+        XCTAssertEqual(object["code"] as? Int, 3)
+    }
+
     func testActionDisplayResolver_upgradesSingleLogiCustomBindingToBrandedNamedAction() {
         let presentation = makeResolvedPresentation(customBindingName: "custom::1007:0")
 
@@ -797,6 +873,47 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(openItem.title, NSLocalizedString("open-target-action", comment: ""))
     }
 
+    func testBuildShortcutMenu_disablesMouseLeftClickAction() {
+        let menu = NSMenu()
+        let target = ShortcutMenuTestTarget()
+
+        ShortcutManager.buildShortcutMenu(
+            into: menu,
+            target: target,
+            action: #selector(ShortcutMenuTestTarget.noop(_:))
+        )
+
+        let mouseCategoryName = SystemShortcut.localizedCategoryName(SystemShortcut.mouseButtonsCategory.category)
+        guard let mouseCategory = menu.items.first(where: { $0.title == mouseCategoryName }),
+              let leftClickItem = mouseCategory.submenu?.items.first(where: {
+                  ($0.representedObject as? SystemShortcut.Shortcut)?.identifier == "mouseLeftClick"
+              }) else {
+            return XCTFail("Expected mouse left click item in mouse buttons category")
+        }
+
+        XCTAssertFalse(leftClickItem.isEnabled)
+    }
+
+    func testBuildShortcutMenu_usesShortCustomShortcutTitle() {
+        let menu = NSMenu()
+        let target = ShortcutMenuTestTarget()
+
+        ShortcutManager.buildShortcutMenu(
+            into: menu,
+            target: target,
+            action: #selector(ShortcutMenuTestTarget.noop(_:))
+        )
+
+        guard let customItem = menu.items.first(where: {
+            ($0.representedObject as? String) == "__custom__"
+        }) else {
+            return XCTFail("Expected custom shortcut item")
+        }
+
+        XCTAssertFalse(customItem.title.contains("Key"))
+        XCTAssertFalse(customItem.title.contains("按键"))
+    }
+
     func testShortcutSelected_openSentinel_invokesOpenSelectionCallback() {
         let trigger = RecordedEvent(type: .mouse, code: 3, modifiers: 0, displayComponents: ["🖱4"], deviceFilter: nil)
         let binding = ButtonBinding(triggerEvent: trigger, systemShortcutName: "")
@@ -1016,21 +1133,31 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertEqual(cell.actionPopUpButton.titleOfSelectedItem, SystemShortcut.mouseBackClick.localizedName)
     }
 
-    func testPrimaryMouseButtonsAreRecordableOnlyInAdaptiveMode() {
-        for code in [UInt16(0), UInt16(1)] {
-            let event = InputEvent(
-                type: .mouse,
-                code: code,
-                modifiers: [],
-                phase: .down,
-                source: .hidPP,
-                device: nil
-            )
+    func testPrimaryMouseButtonsRecordabilityInAdaptiveMode() {
+        let leftClick = InputEvent(
+            type: .mouse,
+            code: 0,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
+        let rightClick = InputEvent(
+            type: .mouse,
+            code: 1,
+            modifiers: [],
+            phase: .down,
+            source: .hidPP,
+            device: nil
+        )
 
-            XCTAssertTrue(event.isRecordableAsAdaptive)
-            XCTAssertFalse(event.isRecordableAsSingleKey)
-            XCTAssertFalse(event.isRecordable)
-        }
+        XCTAssertFalse(leftClick.isRecordableAsAdaptive)
+        XCTAssertFalse(leftClick.isRecordableAsSingleKey)
+        XCTAssertFalse(leftClick.isRecordable)
+
+        XCTAssertTrue(rightClick.isRecordableAsAdaptive)
+        XCTAssertFalse(rightClick.isRecordableAsSingleKey)
+        XCTAssertFalse(rightClick.isRecordable)
     }
 
     func testKeyPopoverDuplicateHintUsesDedicatedTextAndEscHintStyle() {

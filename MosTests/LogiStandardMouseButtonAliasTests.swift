@@ -38,7 +38,7 @@ final class LogiStandardMouseButtonAliasTests: XCTestCase {
         XCTAssertEqual(converted?.type, .mouse)
         XCTAssertEqual(converted?.code, 3)
         XCTAssertEqual(converted?.modifiers, 0)
-        XCTAssertEqual(converted?.displayComponents, ["🖱3"])
+        XCTAssertEqual(converted?.displayComponents, ["🖱️ Back Button"])
         XCTAssertNil(converted?.deviceFilter)
     }
 
@@ -61,7 +61,7 @@ final class LogiStandardMouseButtonAliasTests: XCTestCase {
         let normalized = event.normalizedForButtonBinding(diagnosis: diagnosis)
 
         XCTAssertEqual(normalized.code, 3)
-        XCTAssertEqual(normalized.displayComponents, ["🖱3"])
+        XCTAssertEqual(normalized.displayComponents, ["🖱️ Back Button"])
     }
 
     func testRecordedEventKeepsLogiCodeWhenDeliveryUsesHIDPPEvents() {
@@ -139,7 +139,7 @@ final class LogiStandardMouseButtonAliasTests: XCTestCase {
             type: .mouse,
             code: 3,
             modifiers: 0,
-            displayComponents: ["🖱3"],
+            displayComponents: ["🖱️ Back Button"],
             deviceFilter: nil
         )
         let existingNative = ButtonBinding(

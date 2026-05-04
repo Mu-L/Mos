@@ -24,7 +24,6 @@ enum LogiStandardMouseButtonAlias {
             type: .mouse,
             code: nativeCode,
             modifiers: event.modifiers,
-            displayComponents: displayComponents(code: nativeCode, modifiers: event.modifiers),
             deviceFilter: nil
         )
     }
@@ -34,21 +33,5 @@ enum LogiStandardMouseButtonAlias {
             return nil
         }
         return binding.replacingTriggerEvent(nativeTrigger)
-    }
-
-    private static func displayComponents(code: UInt16, modifiers: UInt) -> [String] {
-        var modSymbols: [String] = []
-        if modifiers & UInt(CGEventFlags.maskShift.rawValue) != 0 { modSymbols.append("⇧") }
-        if modifiers & UInt(CGEventFlags.maskSecondaryFn.rawValue) != 0 { modSymbols.append("Fn") }
-        if modifiers & UInt(CGEventFlags.maskControl.rawValue) != 0 { modSymbols.append("⌃") }
-        if modifiers & UInt(CGEventFlags.maskAlternate.rawValue) != 0 { modSymbols.append("⌥") }
-        if modifiers & UInt(CGEventFlags.maskCommand.rawValue) != 0 { modSymbols.append("⌘") }
-
-        var components: [String] = []
-        if !modSymbols.isEmpty {
-            components.append(modSymbols.joined(separator: " "))
-        }
-        components.append(KeyCode.mouseMap[code] ?? "Mouse(\(code))")
-        return components
     }
 }

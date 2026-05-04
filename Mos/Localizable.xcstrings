@@ -2180,13 +2180,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Custom Key…"
+            "value": "Custom…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自定义按键…"
+            "value": "自定义…"
           }
         }
       }

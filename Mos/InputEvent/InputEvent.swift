@@ -181,6 +181,7 @@ struct InputEvent {
             }
             return true
         case .mouse:
+            if code == 0 { return false }
             return true
         }
     }

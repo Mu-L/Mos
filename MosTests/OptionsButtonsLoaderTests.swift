@@ -51,6 +51,14 @@ final class OptionsButtonsLoaderTests: XCTestCase {
         XCTAssertEqual(bindings.first?.systemShortcutName, "copy")
     }
 
+    func testDecode_legacyDisplayComponentsUseCurrentPresentation() {
+        let json = "[\(makeBindingJSON())]"
+        let data = json.data(using: .utf8)!
+        let bindings = Options.decodeButtonBindings(from: data)
+
+        XCTAssertEqual(bindings.first?.triggerEvent.displayComponents, ["🖱️ Back Button"])
+    }
+
     func testDecode_corruptOuterArray_returnsEmpty() {
         // Not a JSON array at all
         let data = "{\"not\":\"array\"}".data(using: .utf8)!

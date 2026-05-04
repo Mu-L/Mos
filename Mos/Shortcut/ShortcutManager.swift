@@ -224,6 +224,9 @@ class ShortcutManager {
             shortcutMenuItem.target = target
             shortcutMenuItem.representedObject = shortcut
             shortcutMenuItem.toolTip = shortcut.localizedDescription ?? shortcut.localizedName
+            if shortcut.identifier == SystemShortcut.mouseLeftClick.identifier {
+                shortcutMenuItem.isEnabled = false
+            }
 
             if supportsSFSymbols {
                 if #available(macOS 11.0, *) {
