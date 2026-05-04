@@ -44,6 +44,7 @@ class ShortcutManager {
     static func buildShortcutMenu(into menu: NSMenu, target: AnyObject, action: Selector, showLogiActions: Bool = false) {
         // 清空现有菜单项
         menu.removeAllItems()
+        menu.autoenablesItems = false
 
         // 添加占位符 (用于显示当前选中的快捷键)
         // NSPopUpButton 不会自动显示子菜单项标题,必须用占位符模式
@@ -81,6 +82,7 @@ class ShortcutManager {
 
             // 创建子菜单
             let subMenu = NSMenu(title: categoryName)
+            subMenu.autoenablesItems = false
 
             // 添加该分类下的所有快捷键到子菜单(过滤掉当前系统不支持的,保持原始顺序)
             let availableShortcuts = shortcuts.filter { $0.isAvailable }
@@ -211,6 +213,7 @@ class ShortcutManager {
         }
 
         let subMenu = NSMenu(title: categoryName)
+        subMenu.autoenablesItems = false
         let availableShortcuts = category.shortcuts.filter { $0.isAvailable }
         for shortcut in availableShortcuts {
             let menuKeyEquivalent = shortcut.keyEquivalent

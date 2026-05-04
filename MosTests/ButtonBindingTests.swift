@@ -950,6 +950,31 @@ final class ButtonBindingTests: XCTestCase {
         XCTAssertFalse(leftClickItem.isEnabled)
     }
 
+    func testBuildShortcutMenu_keepsManualDisabledStateDuringMenuPresentation() {
+        let menu = NSMenu()
+        let target = ShortcutMenuTestTarget()
+
+        ShortcutManager.buildShortcutMenu(
+            into: menu,
+            target: target,
+            action: #selector(ShortcutMenuTestTarget.noop(_:))
+        )
+
+        let mouseCategoryName = SystemShortcut.localizedCategoryName(SystemShortcut.mouseButtonsCategory.category)
+        guard let mouseCategory = menu.items.first(where: { $0.title == mouseCategoryName }),
+              let mouseSubmenu = mouseCategory.submenu,
+              let leftClickItem = mouseSubmenu.items.first(where: {
+                  ($0.representedObject as? SystemShortcut.Shortcut)?.identifier == "mouseLeftClick"
+              }) else {
+            return XCTFail("Expected mouse left click item in mouse buttons category")
+        }
+
+        XCTAssertFalse(menu.autoenablesItems)
+        XCTAssertFalse(mouseSubmenu.autoenablesItems)
+        mouseSubmenu.update()
+        XCTAssertFalse(leftClickItem.isEnabled)
+    }
+
     func testBuildShortcutMenu_usesShortCustomShortcutTitle() {
         let menu = NSMenu()
         let target = ShortcutMenuTestTarget()
@@ -1044,7 +1069,8 @@ final class ButtonBindingTests: XCTestCase {
             return XCTFail("Expected escape shortcut to exist")
         }
 
-        XCTAssertEqual(shortcut.localizedName, "Escape")
+        XCTAssertEqual(shortcut.localizedName, NSLocalizedString("escapeKey", comment: ""))
+        XCTAssertNotEqual(shortcut.localizedName, "escapeKey")
     }
 
     func testConfiguredButtonCell_showsNamedShortcutForEquivalentCustomBinding() {
