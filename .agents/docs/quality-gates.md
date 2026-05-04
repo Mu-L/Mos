@@ -33,11 +33,11 @@
 
 ## UI 与本地化
 
-- Swift 文案使用 `NSLocalizedString(_:comment:)`。
+- Swift 文案使用 `NSLocalizedString(_:comment:)`；因为 Mos 最低支持 macOS 10.13，不要使用 `String(localized:)`。
 - `Mos/Localizable.xcstrings` 和 `Mos/mul.lproj/Main.xcstrings` 保持分离。
 - 不重命名已被代码、持久化或 Interface Builder 使用的 key。
 - UI 改动检查长文本、Light/Dark Mode、Auto Layout 和 macOS 10.13 fallback。
 
 ## 发布
 
-发布、Sparkle、签名、notarization、appcast 和 GitHub release draft 必须使用 `.agents/skills/release-preparation/SKILL.md`。每次 release 都必须让 `CURRENT_PROJECT_VERSION` 唯一递增。不要在没有用户确认的情况下发布 release 或推送发布分支。
+发布、Sparkle、签名、notarization、appcast 和 GitHub release draft 必须使用 `.agents/skills/release-preparation/SKILL.md`。每次 release 都必须让 `CURRENT_PROJECT_VERSION` 唯一递增。不要在没有用户确认的情况下发布 release 或推送发布分支；在计划或命令列表中也要把 push/publish 与可自动执行步骤分开。

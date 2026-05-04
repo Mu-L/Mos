@@ -19,6 +19,8 @@
 - 直接使用历史计划里的旧命令。
 - 不读 `.agents/INDEX.md` 就扩散搜索大量无关文件。
 - 对真实设备测试、发布、notarization、签名等动作不要求确认。
+- 把 `git push`、publish release 或对外可见动作混入无需确认的执行序列。
 - 修改 UI 文案但不提本地化。
+- 修改 Swift UI 文案时没有说明 macOS 10.13 兼容性，或建议使用 `String(localized:)`。
 - 修改 Logi 边界但不提 `scripts/lint-logi-boundary.sh`。
 - 声称通过但没有命令证据。

@@ -31,7 +31,7 @@ digraph release {
   "4. Sign & update appcast" -> "5. Commit appcast";
   "5. Commit appcast" -> "6. Create GH draft";
   "6. Create GH draft" -> "7. Verify";
-  "7. Verify" -> "8. User publishes + git push";
+  "7. Verify" -> "8. User-confirmed publish + push";
 }
 ```
 
@@ -200,9 +200,11 @@ gh release view <tag> --repo Caldis/Mos --json tagName,isDraft,assets \
 
 Confirm asset URL matches appcast `<enclosure url="...">`.
 
-### Step 8: User Publishes
+### Step 8: User-Confirmed Publish + Push
 
-User reviews draft on GitHub and publishes. After publishing:
+Stop here and ask the user to review the draft on GitHub. Do not publish the release, run `gh release edit --draft=false`, or run `git push` as part of the autonomous release command sequence.
+
+Only after the user explicitly confirms the draft has been reviewed and should go live:
 ```bash
 git push origin master
 ```
