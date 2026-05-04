@@ -13,64 +13,48 @@
 
       <description><![CDATA[<h2>新功能</h2>
 <ul>
-<li>新增 Logi/HID++ 原生支持, 可识别 Bolt/Unifying 接收器与蓝牙直连设备, 并将可编程 Logi 按键用于滚动功能键或按钮绑定。</li>
-<li>新增 Logi 设备动作: SmartShift 切换、DPI 升/降档、主机切换、高精度滚动、滚动反转、拇指轮与指针速度等。</li>
-<li>按钮绑定新增「打开…」动作, 可启动 App、运行脚本或打开任意文件, 支持拖拽选择与启动参数。</li>
-<li>按钮绑定支持自定义快捷键录制、按住修饰键等更灵活的鼠标按键动作。</li>
-<li>新增轻量 Toast 通知, 用于设备动作反馈、错误提示和调试辅助。</li>
+<li>新增 Logi/HID++ 原生支持, 可识别 Bolt/Unifying 接收器与蓝牙直连设备按钮, 并支持分配 Logi 专有事件</li>
+<li>按钮绑定新增「打开…」动作, 可启动 App、运行脚本或打开任意文件, 支持拖拽选择与启动参数</li>
+<li>按钮绑定新增「自定义…」录制、可更灵活的鼠标按键动作</li>
+<li>滚动功能现在支持绑定任意自定义按键</li>
 </ul>
 
 <h2>优化</h2>
 <ul>
-<li>重构输入事件与快捷动作执行链路, 统一普通鼠标、Logi HID++ 与滚动功能键的处理方式。</li>
-<li>优化 Logi 按键接管策略, Mos 会尽量只接管自己正在使用的控件, 并更清晰地提示 BLE / Logi Options+ 竞争状态。</li>
-<li>新增和优化 Logi 调试面板、冲突指示、活动状态 hover popover 与 DEBUG 自检入口, 便于排查设备状态。</li>
-<li>改进按钮动作显示、品牌标签、按键预览和弹出菜单交互。</li>
-<li>新增捷克语本地化, 感谢 @karelfh; 同步补充多语言文案。</li>
+<li>新增捷克语本地化, 感谢 @karelfh</li>
 </ul>
 
 <h2>修复</h2>
 <ul>
-<li>修复辅助功能权限在运行中被撤销后, 可能阻断系统输入的问题。</li>
-<li>改进 DisplayLink 异常和屏幕变化后的平滑滚动恢复路径, 降低滚动异常或卡住的风险。</li>
-<li>修复滚动选项等值比较方向错误, 感谢 @seng1e。</li>
-<li>修复自定义按键录制、纯修饰键显示、同时松开修饰键识别和录制期间误触发动作的问题。</li>
-<li>修复多处 Logi 蓝牙/会话稳定性问题, 包括断连状态清理、DPI 解析、BLE/接收器会话选择和外部接管恢复。</li>
-<li>修复打开 App/脚本动作在 Xcode 调试环境下可能继承 DYLD/debug 变量, 导致子进程启动异常的问题。</li>
-<li>修复 HID++/Logi 调试面板布局、表格自适应和文案显示问题。</li>
+<li>修复滚动选项等值比较方向错误, 感谢 @seng1e</li>
+<li>修复辅助功能权限在运行中被撤销后, 可能阻断系统输入的问题</li>
+<li>改进 DisplayLink 异常和屏幕变化后的平滑滚动恢复路径, 降低滚动异常或卡住的风险</li>
+<li>修复自定义按键录制、纯修饰键显示、同时松开修饰键识别和录制期间误触发动作的问题</li>
 </ul>
 
 <hr/>
 
 <h2>New Features</h2>
 <ul>
-<li>Added native Logi/HID++ support for Bolt/Unifying receivers and BLE devices, allowing programmable Logi buttons to be used as scroll hotkeys or button bindings.</li>
-<li>Added Logi device actions: SmartShift toggle, DPI up/down, host switching, Hi-Res scroll, scroll inversion, thumb wheel, pointer speed, and more.</li>
-<li>Added an "Open..." button action to launch apps, run scripts, or open files, with drag-and-drop selection and launch arguments where supported.</li>
-<li>Added custom shortcut recording and hold-to-modifier style actions for mouse button bindings.</li>
-<li>Added lightweight toast notifications for device/action feedback, errors, and diagnostics.</li>
+<li>Added native Logi/HID++ support for Bolt/Unifying receivers and Bluetooth direct-connected device buttons, with support for assigning Logi-specific events.</li>
+<li>Added an "Open..." button action to launch apps, run scripts, or open any file, with drag-and-drop selection and launch arguments.</li>
+<li>Added "Custom..." recording for button bindings, enabling more flexible mouse button actions.</li>
+<li>Scroll features can now be bound to any custom key.</li>
 </ul>
 
 <h2>Improvements</h2>
 <ul>
-<li>Reworked the input event and shortcut execution pipeline to handle standard mouse, Logi HID++, and scroll hotkey events consistently.</li>
-<li>Improved Logi capture behavior so Mos touches only the controls it owns and surfaces BLE / Logi Options+ conflicts more clearly.</li>
-<li>Expanded Logi debug tooling with conflict indicators, activity popovers, and DEBUG self-test helpers.</li>
-<li>Polished button action display, brand tags, key previews, and popup interactions.</li>
-<li>Added Czech localization, thanks @karelfh; refreshed multilingual strings.</li>
+<li>Added Czech localization, thanks @karelfh.</li>
 </ul>
 
 <h2>Fixes</h2>
 <ul>
-<li>Fixed system input blocking when Accessibility permission is revoked while Mos is running.</li>
-<li>Improved smooth-scroll recovery after DisplayLink failures and screen changes.</li>
 <li>Fixed reversed scroll options equality comparison, thanks @seng1e.</li>
-<li>Fixed custom recording, pure modifier display, simultaneous modifier release detection, and accidental execution while recording.</li>
-<li>Fixed multiple Logi BLE/session stability issues, including disconnect cleanup, DPI parsing, BLE/receiver session selection, and external ownership recovery.</li>
-<li>Fixed Open app/script actions inheriting Xcode DYLD/debug environment variables that could break child app launches.</li>
-<li>Fixed HID++/Logi debug panel layout, table sizing, and text clipping issues.</li>
+<li>Fixed system input blocking when Accessibility permission is revoked while Mos is running.</li>
+<li>Improved smooth-scroll recovery after DisplayLink errors and screen changes, reducing the risk of abnormal or stuck scrolling.</li>
+<li>Fixed custom key recording, pure modifier display, simultaneous modifier release detection, and accidental action execution while recording.</li>
 </ul>]]></description>
-      <pubDate>Mon, 04 May 2026 16:51:37 +0000</pubDate>
+      <pubDate>Mon, 04 May 2026 17:38:55 +0000</pubDate>
 
       <enclosure
         url="https://github.com/Caldis/Mos/releases/download/4.2.0/Mos.Versions.4.2.0-20260505.1.zip"
