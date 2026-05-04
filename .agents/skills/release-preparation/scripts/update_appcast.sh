@@ -4,7 +4,8 @@
 # Reads signing key from macOS Keychain via Sparkle sign_update tool
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
 BUILD_DIR="$ROOT_DIR/build"
 DOCS_DIR="$ROOT_DIR/docs"
 GITHUB_REPO="Caldis/Mos"

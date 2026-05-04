@@ -97,7 +97,7 @@ The notarized app at `/tmp/MosExport/Mos.app` is used for Step 1.
 ### Step 1: Package Zip
 
 ```bash
-bash .skills/release-preparation/scripts/prepare_zip.sh /tmp/MosExport/Mos.app [--channel beta]
+bash .agents/skills/release-preparation/scripts/prepare_zip.sh /tmp/MosExport/Mos.app [--channel beta]
 ```
 
 Returns JSON with `zip_path`, `version`, `build`, `tag`, `zip_name`, `length`.
@@ -119,7 +119,7 @@ zipinfo -1 "$ZIP_PATH" | grep '/\._' && echo "ERROR: AppleDouble files found!" |
    gh release list --repo Caldis/Mos --limit 1 --json tagName,isPrerelease
    git rev-parse <tag>  # get exact commit SHA
    ```
-2. Get changes: `git log <last_tag>..HEAD --no-merges --oneline` excluding `website/`, `docs/`, `.issues-archive/`, `CLAUDE.md`, `LOCALIZATION.md`, `build/`, `dmg/`, `CRASH_FIX_DESIGN*`.
+2. Get changes: `git log <last_tag>..HEAD --no-merges --oneline` excluding `website/`, `docs/`, `.issues-archive/`, `AGENTS.md`, `CLAUDE.md`, `LOCALIZATION.md`, `.agents/`, `.claude/`, `.codex/`, `.skills/`, `build/`, `dmg/`, `CRASH_FIX_DESIGN*`.
 3. Categorize into: 新功能/New Features, 优化/Improvements, 修复/Fixes.
 4. Find contributors: cross-reference `git log --format="%an"` with `gh api repos/.../commits/<sha> --jq '.author.login'`. Inline credit in the relevant section (e.g., "修复鼠标中键映射问题, 感谢 @GonzFC"), NOT in a separate section.
 5. Match tone of `CHANGELOG.md` — bilingual (Chinese first, `---` separator, then English).
@@ -155,14 +155,14 @@ zipinfo -1 "$ZIP_PATH" | grep '/\._' && echo "ERROR: AppleDouble files found!" |
 
 ### Step 3: Interactive Confirm
 
-**MUST use `AskUserQuestion`** to confirm changelog items. Never list items as text and ask user to type numbers.
+**MUST use the current agent platform's interactive confirmation tool** to confirm changelog items (for example, Claude Code `AskUserQuestion`, or Codex's user-input flow when available). Never list items as text and ask user to type numbers.
 
 After confirmation, sync any user edits from markdown back to HTML. Always keep both formats in sync.
 
 ### Step 4: Sign & Update Appcast
 
 ```bash
-bash .skills/release-preparation/scripts/update_appcast.sh <zip_path> /tmp/changelog-{version}.html [--tag TAG]
+bash .agents/skills/release-preparation/scripts/update_appcast.sh <zip_path> /tmp/changelog-{version}.html [--tag TAG]
 ```
 
 Uses Sparkle `sign_update` from Xcode DerivedData (reads EdDSA key from Keychain). If key missing, guide user:
@@ -186,7 +186,7 @@ git commit -m "chore: update appcast for {version}"
 ### Step 6: Create GitHub Draft
 
 ```bash
-bash .skills/release-preparation/scripts/create_gh_draft.sh <tag> <zip_path> ~/Desktop/release-notes-{version}.md [--prerelease]
+bash .agents/skills/release-preparation/scripts/create_gh_draft.sh <tag> <zip_path> ~/Desktop/release-notes-{version}.md [--prerelease]
 ```
 
 Add `--prerelease` for beta/alpha channels. This creates a **draft** — never publish without user approval.

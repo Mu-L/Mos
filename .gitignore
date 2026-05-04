@@ -20,5 +20,7 @@ build/*.zip
 /build
 /spec
 .superpowers/
+/.agents/worktrees
+/.agents/scheduled_tasks.lock
 /.claude/worktrees
 /.claude/scheduled_tasks.lock
