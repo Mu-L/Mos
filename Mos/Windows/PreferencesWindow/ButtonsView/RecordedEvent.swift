@@ -493,14 +493,53 @@ enum ButtonBindingReplacement {
             return bindings
         }
 
+        let mergedReplacement = replacement.mergingActionFromDuplicateIfNeeded(in: bindings)
         var result = bindings.filter { binding in
             binding.id == replacement.id || binding.triggerEvent != replacement.triggerEvent
         }
         guard let index = result.firstIndex(where: { $0.id == replacement.id }) else {
             return bindings
         }
-        result[index] = replacement
+        result[index] = mergedReplacement
         return result
+    }
+}
+
+private extension ButtonBinding {
+    var hasPersistentAction: Bool {
+        return openTarget != nil || !systemShortcutName.isEmpty
+    }
+
+    func mergingActionFromDuplicateIfNeeded(in bindings: [ButtonBinding]) -> ButtonBinding {
+        guard !hasPersistentAction else { return self }
+        guard let donor = bindings.first(where: { binding in
+            binding.id != id &&
+            binding.triggerEvent == triggerEvent &&
+            binding.hasPersistentAction
+        }) else {
+            return self
+        }
+        return replacingAction(from: donor)
+    }
+
+    func replacingAction(from donor: ButtonBinding) -> ButtonBinding {
+        if let payload = donor.openTarget {
+            return ButtonBinding(
+                id: id,
+                triggerEvent: triggerEvent,
+                openTarget: payload,
+                isEnabled: donor.isEnabled,
+                createdAt: createdAt
+            )
+        }
+
+        return ButtonBinding(
+            id: id,
+            triggerEvent: triggerEvent,
+            systemShortcutName: donor.systemShortcutName,
+            isEnabled: donor.isEnabled,
+            createdAt: createdAt
+        )
     }
 }
 

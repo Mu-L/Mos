@@ -170,4 +170,99 @@ final class LogiStandardMouseButtonAliasTests: XCTestCase {
         XCTAssertEqual(merged.first?.id, logiBack.id)
         XCTAssertEqual(merged.first?.systemShortcutName, "launchpad")
     }
+
+    func testStandardAliasReplacementKeepsLogiActionWhenOnlyLogiIsBound() {
+        let existingNative = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+            triggerEvent: Self.nativeBackEvent(),
+            systemShortcutName: "",
+            isEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let logiBack = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000001007")!,
+            triggerEvent: Self.logiBackEvent(),
+            systemShortcutName: "launchpad",
+            isEnabled: true,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let replacement = logiBack.standardMouseAliasBindingIfAvailable()!
+        let merged = ButtonBindingReplacement.replacing(replacement, in: [existingNative, logiBack])
+
+        XCTAssertEqual(merged.map(\.triggerEvent.code), [3])
+        XCTAssertEqual(merged.first?.id, logiBack.id)
+        XCTAssertEqual(merged.first?.systemShortcutName, "launchpad")
+        XCTAssertEqual(merged.first?.isEnabled, true)
+    }
+
+    func testStandardAliasReplacementKeepsNativeActionWhenOnlyNativeIsBound() {
+        let existingNative = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+            triggerEvent: Self.nativeBackEvent(),
+            systemShortcutName: "missionControl",
+            isEnabled: true,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let logiBack = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000001008")!,
+            triggerEvent: Self.logiBackEvent(),
+            systemShortcutName: "",
+            isEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let replacement = logiBack.standardMouseAliasBindingIfAvailable()!
+        let merged = ButtonBindingReplacement.replacing(replacement, in: [existingNative, logiBack])
+
+        XCTAssertEqual(merged.map(\.triggerEvent.code), [3])
+        XCTAssertEqual(merged.first?.id, logiBack.id)
+        XCTAssertEqual(merged.first?.systemShortcutName, "missionControl")
+        XCTAssertEqual(merged.first?.isEnabled, true)
+    }
+
+    func testStandardAliasReplacementLeavesMergedBindingUnboundWhenNeitherSideIsBound() {
+        let existingNative = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
+            triggerEvent: Self.nativeBackEvent(),
+            systemShortcutName: "",
+            isEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let logiBack = ButtonBinding(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000001009")!,
+            triggerEvent: Self.logiBackEvent(),
+            systemShortcutName: "",
+            isEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let replacement = logiBack.standardMouseAliasBindingIfAvailable()!
+        let merged = ButtonBindingReplacement.replacing(replacement, in: [existingNative, logiBack])
+
+        XCTAssertEqual(merged.map(\.triggerEvent.code), [3])
+        XCTAssertEqual(merged.first?.id, logiBack.id)
+        XCTAssertEqual(merged.first?.systemShortcutName, "")
+        XCTAssertEqual(merged.first?.isEnabled, false)
+    }
+
+    private static func nativeBackEvent() -> RecordedEvent {
+        RecordedEvent(
+            type: .mouse,
+            code: 3,
+            modifiers: 0,
+            displayComponents: ["🖱️ Back Button"],
+            deviceFilter: nil
+        )
+    }
+
+    private static func logiBackEvent() -> RecordedEvent {
+        RecordedEvent(
+            type: .mouse,
+            code: 1006,
+            modifiers: 0,
+            displayComponents: ["Back Button", "[Logi]"],
+            deviceFilter: nil
+        )
+    }
 }
