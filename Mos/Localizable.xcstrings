@@ -2799,25 +2799,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Escape"
+            "value": "退出键"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Escape"
+            "value": "退出鍵"
           }
         },
         "zh-Hant-HK": {
           "stringUnit": {
             "state": "translated",
-            "value": "Escape"
+            "value": "退出鍵"
           }
         },
         "zh-Hant-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "Escape"
+            "value": "退出鍵"
           }
         }
       }
