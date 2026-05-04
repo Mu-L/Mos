@@ -12518,43 +12518,43 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This button appears to be managed by another app (e.g. Logitech Options+). When both apps capture the same button, behavior may be unpredictable. Release it in the other app, or quit that app, to let Mos handle it. For better stability, connect the device through a Bolt or Unifying receiver when possible."
+            "value": "This button appears to be managed by another app. Capturing it in multiple apps at the same time may cause abnormal behavior. Release this button in the other app, or disable that app. For more stable capture, connect the device through a Bolt/Unifying receiver when possible."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このボタンは他のアプリ (Logitech Options+ など) に管理されているようです。両方のアプリが同じボタンを捕捉すると、動作が不安定になる場合があります。他のアプリでこのボタンを解放するか、そのアプリを終了すると、Mos が処理できるようになります。安定性を高めるには、可能な場合は Bolt または Unifying レシーバーで接続してください。"
+            "value": "このボタンは他のアプリに管理されているようです。複数のアプリが同時に捕捉すると、動作が不安定になる場合があります。該当するアプリでこのボタンを解放するか、そのアプリを無効にしてください。より安定した捕捉のため、可能であれば Bolt/Unifying レシーバーでデバイスを接続してください。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 버튼은 다른 앱(예: Logitech Options+)이 관리하는 것으로 보입니다. 두 앱이 같은 버튼을 캡처하면 예기치 않은 동작이 발생할 수 있습니다. 다른 앱에서 이 버튼을 해제하거나 해당 앱을 종료하면 Mos가 처리할 수 있습니다. 더 안정적으로 사용하려면 가능한 경우 Bolt 또는 Unifying 수신기로 연결하세요."
+            "value": "이 버튼은 다른 앱이 관리하는 것으로 보입니다. 여러 앱이 동시에 캡처하면 동작이 비정상적일 수 있습니다. 해당 앱에서 이 버튼을 해제하거나 그 앱을 비활성화하세요. 더 안정적인 캡처를 위해 가능하면 Bolt/Unifying 수신기로 기기를 연결하세요."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此按键似乎正被其他应用 (例如 Logitech Options+) 接管。两个应用同时捕获同一按键可能导致行为异常。请在对应应用中释放该按键,或退出该应用,以便由 Mos 处理。如需更稳定的接管体验,建议优先通过 Bolt/Unifying 接收器连接设备。"
+            "value": "此按键似乎正被其他应用接管, 多个应用同时捕获可能导致行为异常。请在对应应用中释放该按键, 或停用该应用。如需更稳定的接管体验,建议优先通过 Bolt/Unifying 接收器连接设备。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
+            "value": "此按鍵似乎正被其他應用程式接管, 多個應用程式同時捕捉可能導致行為異常。請在對應應用程式中釋放該按鍵, 或停用該應用程式。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
           }
         },
         "zh-Hant-HK": {
           "stringUnit": {
             "state": "translated",
-            "value": "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
+            "value": "此按鍵似乎正被其他應用程式接管, 多個應用程式同時捕捉可能導致行為異常。請在對應應用程式中釋放該按鍵, 或停用該應用程式。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
           }
         },
         "zh-Hant-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "此按鍵似乎正被其他應用程式 (例如 Logitech Options+) 接管。兩個應用程式同時捕捉同一按鍵可能導致行為異常。請在對應應用程式中釋放該按鍵,或退出該應用程式,以便由 Mos 處理。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
+            "value": "此按鍵似乎正被其他應用程式接管, 多個應用程式同時捕捉可能導致行為異常。請在對應應用程式中釋放該按鍵, 或停用該應用程式。如需更穩定的接管體驗,建議優先透過 Bolt/Unifying 接收器連接裝置。"
           }
         }
       }
@@ -12800,43 +12800,43 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ button may be unstable"
+            "value": "This button may be recognized unreliably"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ ボタンは不安定になる場合があります"
+            "value": "このボタンの認識は不安定になる場合があります"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ 버튼이 불안정할 수 있습니다"
+            "value": "이 버튼 인식이 불안정할 수 있습니다"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ 按键可能不稳定"
+            "value": "此按键识别可能不稳定"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ 按鍵可能不穩定"
+            "value": "此按鍵識別可能不穩定"
           }
         },
         "zh-Hant-HK": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ 按鍵可能不穩定"
+            "value": "此按鍵識別可能不穩定"
           }
         },
         "zh-Hant-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "BLE HID++ 按鍵可能不穩定"
+            "value": "此按鍵識別可能不穩定"
           }
         }
       }
@@ -12847,43 +12847,43 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This control has no standard macOS mouse-button fallback, so Mos can only recognize it through Logitech HID++ notifications. Over BLE, Logi Options+ may take over or interrupt that notification stream. Use a Bolt or Unifying receiver for more reliable triggering when possible."
+            "value": "This Logi button has no standard macOS mouse-button fallback. Over a Bluetooth connection, the data stream may be taken over or interrupted by Logitech Options. For stable triggering, try connecting through a Bolt/Unifying receiver, or try disabling Logitech Options."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このコントロールには標準 macOS マウスボタンへのフォールバックがないため、Mos は Logitech HID++ 通知でのみ認識できます。BLE では Logi Options+ がこの通知ストリームを取得または中断する場合があります。可能であれば、より安定した動作のために Bolt または Unifying レシーバーを使用してください。"
+            "value": "この Logi ボタンには標準 macOS マウスボタンへのフォールバックがありません。Bluetooth 接続では、データストリームが Logitech Options に取得または中断される場合があります。安定してトリガーするには、Bolt/Unifying レシーバーで接続するか、Logitech Options の無効化を試してください。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 컨트롤에는 표준 macOS 마우스 버튼 폴백이 없어 Mos는 Logitech HID++ 알림으로만 인식할 수 있습니다. BLE에서는 Logi Options+가 이 알림 스트림을 가져가거나 중단할 수 있습니다. 가능하면 더 안정적인 동작을 위해 Bolt 또는 Unifying 수신기를 사용하세요."
+            "value": "이 Logi 버튼에는 표준 macOS 마우스 버튼 폴백이 없습니다. Bluetooth 연결에서는 데이터 스트림이 Logitech Options에 의해 선점되거나 중단될 수 있습니다. 안정적으로 트리거하려면 Bolt/Unifying 수신기로 연결하거나 Logitech Options를 비활성화해 보세요."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此控件没有标准 macOS 鼠标按键回退，Mos 只能通过 Logitech HID++ 通知识别。BLE 连接下该通知流可能被 Logi Options+ 抢占或中断；如需稳定触发，建议优先使用 Bolt 或 Unifying 接收器。"
+            "value": "此 Logi 按键没有标准 macOS 鼠标按键回退, 蓝牙链接下数据流可能被 Logitech Options 抢占或中断. 如需稳定触发, 请尝试通过 Bolt/Unifying 接收器链接, 或尝试停用 Logitech Options."
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "此控制項沒有標準 macOS 滑鼠按鍵回退，Mos 只能透過 Logitech HID++ 通知識別。BLE 連線下該通知流可能被 Logi Options+ 搶占或中斷；如需穩定觸發，建議優先使用 Bolt 或 Unifying 接收器。"
+            "value": "此 Logi 按鍵沒有標準 macOS 滑鼠按鍵回退, 藍牙連線下資料流可能被 Logitech Options 搶占或中斷. 如需穩定觸發, 請嘗試透過 Bolt/Unifying 接收器連線, 或嘗試停用 Logitech Options."
           }
         },
         "zh-Hant-HK": {
           "stringUnit": {
             "state": "translated",
-            "value": "此控制項沒有標準 macOS 滑鼠按鍵回退，Mos 只能透過 Logitech HID++ 通知識別。BLE 連線下該通知流可能被 Logi Options+ 搶占或中斷；如需穩定觸發，建議優先使用 Bolt 或 Unifying 接收器。"
+            "value": "此 Logi 按鍵沒有標準 macOS 滑鼠按鍵回退, 藍牙連線下資料流可能被 Logitech Options 搶佔或中斷. 如需穩定觸發, 請嘗試透過 Bolt/Unifying 接收器連線, 或嘗試停用 Logitech Options."
           }
         },
         "zh-Hant-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "此控制項沒有標準 macOS 滑鼠按鍵回退，Mos 只能透過 Logitech HID++ 通知識別。BLE 連線下該通知流可能被 Logi Options+ 搶占或中斷；如需穩定觸發，建議優先使用 Bolt 或 Unifying 接收器。"
+            "value": "此 Logi 按鍵沒有標準 macOS 滑鼠按鍵回退, 藍牙連線下資料流可能被 Logitech Options 搶佔或中斷. 如需穩定觸發, 請嘗試透過 Bolt/Unifying 接收器連線, 或嘗試停用 Logitech Options."
           }
         }
       }
