@@ -32,6 +32,7 @@
 <ul>
 <li>修复滚动选项等值比较方向错误, 感谢 @seng1e</li>
 <li>修复辅助功能权限在运行中被撤销后, 可能阻断系统输入的问题</li>
+<li>修复按键映射功能导致在部分应用中左键点击异常的问题 https://github.com/Caldis/Mos/issues/890</li>
 <li>改进 DisplayLink 异常和屏幕变化后的平滑滚动恢复路径, 降低滚动异常或卡住的风险</li>
 <li>修复自定义按键录制、纯修饰键显示、同时松开修饰键识别和录制期间误触发动作的问题</li>
 </ul>
@@ -59,10 +60,11 @@
 <ul>
 <li>Fixed reversed scroll options equality comparison, thanks @seng1e.</li>
 <li>Fixed system input blocking when Accessibility permission is revoked while Mos is running.</li>
+<li>Fixed abnormal left-click behavior in some apps caused by button mapping. https://github.com/Caldis/Mos/issues/890</li>
 <li>Improved smooth-scroll recovery after DisplayLink errors and screen changes, reducing the risk of abnormal or stuck scrolling.</li>
 <li>Fixed custom key recording, pure modifier display, simultaneous modifier release detection, and accidental action execution while recording.</li>
 </ul>]]></description>
-      <pubDate>Mon, 04 May 2026 17:44:11 +0000</pubDate>
+      <pubDate>Mon, 04 May 2026 18:20:27 +0000</pubDate>
 
       <enclosure
         url="https://github.com/Caldis/Mos/releases/download/4.2.0/Mos.Versions.4.2.0-20260505.1.zip"
