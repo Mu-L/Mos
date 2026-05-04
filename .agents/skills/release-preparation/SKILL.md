@@ -25,6 +25,13 @@ Full release pipeline: bump version → build → sign → notarize → package 
 - Choose the build from the release date (`YYYYMMDD.1` by default); if another release/build already uses that value, increment `.N`.
 - After editing, verify both `CURRENT_PROJECT_VERSION` occurrences in `Mos.xcodeproj/project.pbxproj` match. Do not phrase this step to the user as optional.
 
+## Absolute Stop: Draft Only
+
+- Agents may create or update a GitHub **draft** release only. Never publish a formal release, undraft a release, or run any command that makes the release public.
+- Forbidden autonomous commands include `gh release edit --draft=false`, `gh release edit --latest`, deleting/recreating a public release to simulate publishing, or using any GitHub UI/API path that changes a draft into a published release.
+- Pushing release/appcast commits is also a separate user-confirmed step. Do not run `git push` during draft creation.
+- After creating and verifying the draft, stop and hand off to the user for GitHub review, formal publish, and push.
+
 ## Flow
 
 ```dot
