@@ -13,7 +13,11 @@
 
       <description><![CDATA[<h2>新功能</h2>
 <ul>
-<li>新增 Logi/HID++ 原生支持, 可识别 Bolt/Unifying 接收器与蓝牙直连设备按钮, 并支持分配 Logi 专有事件</li>
+<li>新增 Logi/HID++ 原生支持, 可识别 Bolt/Unifying 接收器与蓝牙直连设备按钮, 并支持分配 Logi 专有事件
+<ul>
+<li>相关协议参考了大量项目的逆向工程, 感谢 https://github.com/pwr-Solaar/Solaar 等项目的开源</li>
+</ul>
+</li>
 <li>按钮绑定新增「打开…」动作, 可启动 App、运行脚本或打开任意文件, 支持拖拽选择与启动参数</li>
 <li>按钮绑定新增「自定义…」录制、可更灵活的鼠标按键动作</li>
 <li>滚动功能现在支持绑定任意自定义按键</li>
@@ -36,7 +40,11 @@
 
 <h2>New Features</h2>
 <ul>
-<li>Added native Logi/HID++ support for Bolt/Unifying receivers and Bluetooth direct-connected device buttons, with support for assigning Logi-specific events.</li>
+<li>Added native Logi/HID++ support for Bolt/Unifying receivers and Bluetooth direct-connected device buttons, with support for assigning Logi-specific events.
+<ul>
+<li>The related protocol work references reverse engineering from many projects; thanks to open-source projects such as https://github.com/pwr-Solaar/Solaar.</li>
+</ul>
+</li>
 <li>Added an "Open..." button action to launch apps, run scripts, or open any file, with drag-and-drop selection and launch arguments.</li>
 <li>Added "Custom..." recording for button bindings, enabling more flexible mouse button actions.</li>
 <li>Scroll features can now be bound to any custom key.</li>
@@ -54,7 +62,7 @@
 <li>Improved smooth-scroll recovery after DisplayLink errors and screen changes, reducing the risk of abnormal or stuck scrolling.</li>
 <li>Fixed custom key recording, pure modifier display, simultaneous modifier release detection, and accidental action execution while recording.</li>
 </ul>]]></description>
-      <pubDate>Mon, 04 May 2026 17:38:55 +0000</pubDate>
+      <pubDate>Mon, 04 May 2026 17:44:11 +0000</pubDate>
 
       <enclosure
         url="https://github.com/Caldis/Mos/releases/download/4.2.0/Mos.Versions.4.2.0-20260505.1.zip"
