@@ -30,7 +30,7 @@ Full release pipeline: bump version → build → sign → notarize → package 
 - Agents may create or update a GitHub **draft** release only. Never publish a formal release, undraft a release, or run any command that makes the release public.
 - Forbidden autonomous commands include `gh release edit --draft=false`, `gh release edit --latest`, deleting/recreating a public release to simulate publishing, or using any GitHub UI/API path that changes a draft into a published release.
 - Pushing release/appcast commits is also a separate user-confirmed step. Do not run `git push` during draft creation.
-- After creating and verifying the draft, stop and hand off to the user for GitHub review, formal publish, and push.
+- After creating and verifying the draft, stop and hand off to the user for GitHub review. Proactively remind the user not to publish the GitHub release before release/version/appcast commits and the release tag have been committed and pushed.
 
 ## Flow
 
@@ -46,7 +46,7 @@ digraph release {
   "4. Sign & update appcast" -> "5. Commit appcast";
   "5. Commit appcast" -> "6. Create GH draft";
   "6. Create GH draft" -> "7. Verify";
-  "7. Verify" -> "8. User-confirmed publish + push";
+  "7. Verify" -> "8. User-confirmed push + human publish";
 }
 ```
 
@@ -216,15 +216,21 @@ gh release view <tag> --repo Caldis/Mos --json tagName,isDraft,assets \
 
 Confirm asset URL matches appcast `<enclosure url="...">`.
 
-### Step 8: User-Confirmed Publish + Push
+### Step 8: User-Confirmed Push + Human Publish
 
 Stop here and ask the user to review the draft on GitHub. Do not publish the release, run `gh release edit --draft=false`, or run `git push` as part of the autonomous release command sequence.
 
-Only after the user explicitly confirms the draft has been reviewed and should go live:
+Before the user publishes the draft, proactively remind them:
+
+- Do not click **Publish release** before the release/version/appcast commits are committed and pushed.
+- Push the final release branch and ensure the release tag points to the final release commit first; only then should the user manually publish the GitHub release.
+- If the user has already published first, immediately verify remote branch/tag/release alignment and fix only with explicit user confirmation.
+
+Only after the user explicitly confirms the draft has been reviewed and asks to synchronize code/tag before publishing:
 ```bash
 git push origin master
 ```
-This pushes the appcast update so Sparkle auto-update can find it.
+This pushes the appcast update so Sparkle auto-update can find it. Create or update the release tag only with explicit user confirmation, then hand off to the user for the formal GitHub release publish action.
 
 ## Naming Conventions
 
