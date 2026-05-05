@@ -1,8 +1,9 @@
-# docs
+# website
 website/.idea
 website/.next
 website/node_modules
 website/out
+*.tsbuildinfo
 
 # macOS
 .DS_Store
