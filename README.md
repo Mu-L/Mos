@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mos.caldis.me/">
-    <img width="160" src="docs/readme/app-icon.png" alt="Mos app icon">
+    <img width="160" src="assets/readme/app-icon.png" alt="Mos app icon">
   </a>
 </p>
 
@@ -20,8 +20,11 @@
 <p align="center">
   <a href="README.md">中文</a> ·
   <a href="README.enUS.md">English</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ko.md">한국어</a> ·
   <a href="README.ru.md">Русский</a> ·
-  <a href="README.id.md">Indonesia</a>
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center">
@@ -32,12 +35,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/zh-cn/application-settings.png" alt="Mos 按应用配置滚动" width="920">
+  <img src="assets/readme/zh-cn/application-settings.png" alt="Mos 按应用配置滚动" width="920">
 </p>
 
 ## 为什么是 Mos
 
-普通滚轮在 macOS 上常常显得生硬：缺少触控板那种连贯、可预期的惯性。Mos 会接管鼠标滚轮事件，将原始滚轮增量转换成更顺滑的滚动，同时保留每个应用、每个方向、每颗按键的控制权。
+普通滚轮在 macOS 上常常显得生硬, 这是由于滚轮的精度不足导致的。Mos 会接管鼠标滚轮事件，将滚动行为插值转换成更顺滑的滚动，同时保留每个应用、每个方向、每颗按键的控制权。
+
+同时, 你还可以使用 Mos 对任意鼠标按键进行重新映射或改写, 以适配你的工作流。
 
 Mos 是免费的开源菜单栏工具，支持 macOS 10.13 及以上版本。
 
@@ -48,18 +53,18 @@ Mos 是免费的开源菜单栏工具，支持 macOS 10.13 及以上版本。
 - **滚动功能键**：为加速、方向转换、禁用平滑滚动绑定任意自定义按键。
 - **按应用配置**：每个 App 可以继承全局设置，也可以单独覆盖滚动、快捷键和按钮绑定规则。
 - **按钮绑定**：录制鼠标、键盘或自定义事件，绑定到系统动作、快捷键、打开 App、运行脚本或打开文件。
-- **Logi/HID++ 支持**：支持 Bolt、Unifying 接收器和蓝牙直连设备上的 Logitech 按钮事件，并可处理 Logi 专有动作。
 - **动作库**：内置调度中心、空间切换、截图、访达操作、文档编辑、鼠标滚动等常用动作。
+- **Logi/HID++ 支持**：支持 Bolt、Unifying 接收器和蓝牙直连设备上的 Logitech 按钮事件，并可处理 Logi 专有动作。
 
 ## 截图
 
 | 滚动调节 | 按应用配置 |
 | --- | --- |
-| <img src="docs/readme/zh-cn/scrolling.png" alt="Mos 滚动设置" width="420"> | <img src="docs/readme/zh-cn/application-settings.png" alt="Mos 按应用配置设置" width="420"> |
+| <img src="assets/readme/zh-cn/scrolling.png" alt="Mos 滚动设置" width="420"> | <img src="assets/readme/zh-cn/application-settings.png" alt="Mos 按应用配置设置" width="420"> |
 
 | 打开 App、脚本或文件 | 快捷动作菜单 |
 | --- | --- |
-| <img src="docs/readme/zh-cn/buttons-open.png" alt="Mos 打开动作" width="420"> | <img src="docs/readme/zh-cn/buttons-action.png" alt="Mos 快捷动作菜单" width="420"> |
+| <img src="assets/readme/zh-cn/buttons-open.png" alt="Mos 打开动作" width="420"> | <img src="assets/readme/zh-cn/buttons-action.png" alt="Mos 快捷动作菜单" width="420"> |
 
 ## 下载与安装
 
@@ -84,20 +89,11 @@ brew update
 brew upgrade --cask mos
 ```
 
-## 开发
-
-Mos 是一个 Swift 5、AppKit、Xcode 工程和 Swift Package Manager 项目。常用命令：
-
-```bash
-xcodebuild -scheme Debug -configuration Debug -destination 'platform=macOS' build
-xcodebuild -scheme Debug -destination 'platform=macOS' test
-```
-
-涉及 Logi/HID、辅助功能权限、签名、notarization、更新机制或真实设备测试的改动风险较高，请先在 issue 或 Discussions 中说明背景。
-
 ## 贡献
 
 Mos 是一个会处理系统输入、辅助功能权限、Logi/HID 设备和用户持久化配置的小工具。维护成本和回归风险都很真实，所以我们更欢迎小而集中的改动。
+
+涉及 Logi/HID、辅助功能权限、签名、notarization、更新机制或真实设备测试的改动风险较高，请先在 issue 或 Discussions 中说明背景。
 
 PR 描述中请说明变更动机、测试方式和可能影响的行为。
 
@@ -120,7 +116,7 @@ PR 描述中请说明变更动机、测试方式和可能影响的行为。
 
 我们欢迎任何形式的贡献，有任何建议或意见您可以给我们 [提问](https://github.com/Caldis/Mos/issues)。
 
-如果你对一个功能非常有热情，欢迎先在 [Discussions](https://github.com/Caldis/Mos/discussions) 发起讨论。
+如果你对新增功能非常有热情，欢迎先在 [Discussions](https://github.com/Caldis/Mos/discussions) 发起讨论。
 
 ## 鸣谢
 

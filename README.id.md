@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mos.caldis.me/">
-    <img width="160" src="docs/readme/app-icon.png" alt="Mos app icon">
+    <img width="160" src="assets/readme/app-icon.png" alt="Mos app icon">
   </a>
 </p>
 
@@ -20,8 +20,11 @@
 <p align="center">
   <a href="README.md">中文</a> ·
   <a href="README.enUS.md">English</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ko.md">한국어</a> ·
   <a href="README.ru.md">Русский</a> ·
-  <a href="README.id.md">Indonesia</a>
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center">
@@ -32,12 +35,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
+  <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
 </p>
 
 ## Kenapa Mos
 
 Scroll roda mouse di macOS sering terasa kasar: gerakannya kurang punya inersia yang mulus dan mudah diprediksi seperti trackpad. Mos menangkap event roda mouse dan mengubah delta mentah menjadi scroll yang lebih halus, sambil tetap memberi kamu kendali atas aplikasi, arah scroll, dan tombol.
+
+Kamu juga bisa memakai Mos untuk memetakan ulang atau menulis ulang tombol mouse apa pun agar cocok dengan workflow-mu.
 
 Mos adalah utilitas menu bar gratis dan open-source untuk macOS 10.13 ke atas.
 
@@ -48,18 +53,18 @@ Mos adalah utilitas menu bar gratis dan open-source untuk macOS 10.13 ke atas.
 - **Hotkey scroll**: ikat tombol kustom untuk akselerasi, konversi arah, dan menonaktifkan sementara scroll halus.
 - **Profil per aplikasi**: tiap App bisa mewarisi pengaturan global atau memakai aturan scroll, shortcut, dan button binding sendiri.
 - **Button binding**: rekam event mouse, keyboard, atau event kustom, lalu ikat ke aksi sistem, shortcut, membuka App, menjalankan skrip, atau membuka file.
-- **Dukungan Logi/HID++**: mendukung event tombol Logitech dari receiver Bolt, Unifying, dan perangkat Bluetooth langsung, termasuk aksi khusus Logi.
 - **Daftar aksi**: aksi bawaan untuk Mission Control, Spaces, screenshot, operasi Finder, edit dokumen, scroll mouse, dan lainnya.
+- **Dukungan Logi/HID++**: mendukung event tombol Logitech dari receiver Bolt, Unifying, dan perangkat Bluetooth langsung, termasuk aksi khusus Logi.
 
 ## Screenshot
 
 | Pengaturan scroll | Profil per aplikasi |
 | --- | --- |
-| <img src="docs/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
+| <img src="assets/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
 
 | Buka App, skrip, atau file | Daftar aksi |
 | --- | --- |
-| <img src="docs/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="docs/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
+| <img src="assets/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="assets/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
 
 ## Download & Install
 
@@ -84,20 +89,11 @@ brew update
 brew upgrade --cask mos
 ```
 
-## Development
-
-Mos dibangun dengan Swift 5, AppKit, Xcode, dan Swift Package Manager. Perintah umum:
-
-```bash
-xcodebuild -scheme Debug -configuration Debug -destination 'platform=macOS' build
-xcodebuild -scheme Debug -destination 'platform=macOS' test
-```
-
-Perubahan yang menyentuh Logi/HID, Accessibility, signing, notarization, update aplikasi, atau pengujian perangkat nyata punya risiko lebih tinggi. Tolong jelaskan konteksnya dulu lewat issue atau Discussions.
-
 ## Contributing
 
 Mos menangkap input sistem, memakai izin Accessibility, bekerja dengan perangkat Logi/HID, dan menyimpan konfigurasi pengguna. Biaya maintenance dan risiko regresi itu nyata, jadi kami lebih menyukai perubahan kecil dan fokus.
+
+Perubahan yang menyentuh Logi/HID, Accessibility, signing, notarization, update aplikasi, atau pengujian perangkat nyata punya risiko lebih tinggi. Tolong jelaskan konteksnya dulu lewat issue atau Discussions.
 
 Di deskripsi PR, jelaskan motivasi, cara pengujian, dan kemungkinan dampak perilakunya.
 

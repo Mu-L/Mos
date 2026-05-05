@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mos.caldis.me/">
-    <img width="160" src="docs/readme/app-icon.png" alt="Mos app icon">
+    <img width="160" src="assets/readme/app-icon.png" alt="Mos app icon">
   </a>
 </p>
 
@@ -20,8 +20,11 @@
 <p align="center">
   <a href="README.md">中文</a> ·
   <a href="README.enUS.md">English</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ko.md">한국어</a> ·
   <a href="README.ru.md">Русский</a> ·
-  <a href="README.id.md">Indonesia</a>
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center">
@@ -32,12 +35,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
+  <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
 </p>
 
 ## Зачем нужен Mos
 
 Прокрутка колесом мыши на macOS часто ощущается резкой: ей не хватает непрерывной и предсказуемой инерции трекпада. Mos перехватывает события колеса мыши и превращает исходные дельты в более плавную прокрутку, оставляя вам контроль над приложениями, осями и кнопками.
+
+Mos также позволяет переназначать или переопределять любую кнопку мыши под ваш рабочий процесс.
 
 Mos — бесплатная open-source утилита для строки меню, поддерживающая macOS 10.13 и новее.
 
@@ -48,18 +53,18 @@ Mos — бесплатная open-source утилита для строки ме
 - **Горячие клавиши прокрутки**: привязывайте любые клавиши для ускорения, смены направления и временного отключения плавной прокрутки.
 - **Профили для приложений**: каждое приложение может наследовать глобальные настройки или переопределять прокрутку, сочетания клавиш и привязки кнопок.
 - **Привязки кнопок**: записывайте события мыши, клавиатуры или пользовательские события и назначайте им системные действия, сочетания, запуск приложений, скриптов или файлов.
-- **Поддержка Logi/HID++**: поддерживаются события кнопок Logitech через Bolt, Unifying и прямое Bluetooth-подключение, включая действия Logi.
 - **Библиотека действий**: встроенные действия для Mission Control, Spaces, скриншотов, Finder, редактирования документов, прокрутки мышью и не только.
+- **Поддержка Logi/HID++**: поддерживаются события кнопок Logitech через Bolt, Unifying и прямое Bluetooth-подключение, включая действия Logi.
 
 ## Скриншоты
 
 | Настройка прокрутки | Профили приложений |
 | --- | --- |
-| <img src="docs/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
+| <img src="assets/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
 
 | Открытие приложений, скриптов или файлов | Библиотека действий |
 | --- | --- |
-| <img src="docs/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="docs/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
+| <img src="assets/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="assets/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
 
 ## Загрузка и установка
 
@@ -84,20 +89,11 @@ brew update
 brew upgrade --cask mos
 ```
 
-## Разработка
-
-Mos построен на Swift 5, AppKit, Xcode и Swift Package Manager. Основные команды:
-
-```bash
-xcodebuild -scheme Debug -configuration Debug -destination 'platform=macOS' build
-xcodebuild -scheme Debug -destination 'platform=macOS' test
-```
-
-Изменения, затрагивающие Logi/HID, Accessibility, подпись, notarization, обновления приложения или тестирование на реальных устройствах, несут повышенный риск. Пожалуйста, сначала опишите контекст в issue или Discussions.
-
 ## Участие
 
 Mos перехватывает системный ввод, использует Accessibility, работает с Logi/HID-устройствами и сохраняемыми пользовательскими настройками. Стоимость поддержки и риск регрессий реальны, поэтому мы предпочитаем небольшие и сфокусированные изменения.
+
+Изменения, затрагивающие Logi/HID, Accessibility, подпись, notarization, обновления приложения или тестирование на реальных устройствах, несут повышенный риск. Пожалуйста, сначала опишите контекст в issue или Discussions.
 
 В описании PR укажите мотивацию, способ проверки и возможное влияние на поведение.
 

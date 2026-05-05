@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mos.caldis.me/">
-    <img width="160" src="docs/readme/app-icon.png" alt="Mos app icon">
+    <img width="160" src="assets/readme/app-icon.png" alt="Mos app icon">
   </a>
 </p>
 
@@ -20,8 +20,11 @@
 <p align="center">
   <a href="README.md">中文</a> ·
   <a href="README.enUS.md">English</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ko.md">한국어</a> ·
   <a href="README.ru.md">Русский</a> ·
-  <a href="README.id.md">Indonesia</a>
+  <a href="README.id.md">Bahasa Indonesia</a>
 </p>
 
 <p align="center">
@@ -32,12 +35,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
+  <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app scroll settings" width="920">
 </p>
 
 ## Why Mos
 
 Mouse-wheel scrolling can feel abrupt on macOS: it often lacks the continuous, predictable inertia of a trackpad. Mos intercepts mouse-wheel events and turns raw deltas into smoother scrolling while still letting you decide how each app, axis, and button should behave.
+
+You can also use Mos to remap or rewrite any mouse button so it fits your workflow.
 
 Mos is a free, open-source menu bar utility for macOS 10.13 and later.
 
@@ -48,18 +53,18 @@ Mos is a free, open-source menu bar utility for macOS 10.13 and later.
 - **Scroll hotkeys**: bind custom keys for acceleration, axis conversion, and temporarily disabling smooth scrolling.
 - **Per-app profiles**: let each app inherit global settings, or override scroll, shortcut, and button-binding behavior.
 - **Button bindings**: record mouse, keyboard, or custom events, then bind them to system actions, shortcuts, apps, scripts, or files.
-- **Logi/HID++ support**: handle Logitech button events from Bolt, Unifying, and Bluetooth direct-connected devices, including Logi-specific actions.
 - **Action library**: built-in actions for Mission Control, Spaces, screenshots, Finder operations, document editing, mouse scrolling, and more.
+- **Logi/HID++ support**: handle Logitech button events from Bolt, Unifying, and Bluetooth direct-connected devices, including Logi-specific actions.
 
 ## Screenshots
 
 | Scroll tuning | Per-app profiles |
 | --- | --- |
-| <img src="docs/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="docs/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
+| <img src="assets/readme/en-us/scrolling.png" alt="Mos scroll settings" width="420"> | <img src="assets/readme/en-us/application-settings.png" alt="Mos per-app profile settings" width="420"> |
 
 | Open apps, scripts, or files | Action library |
 | --- | --- |
-| <img src="docs/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="docs/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
+| <img src="assets/readme/en-us/buttons-open.png" alt="Mos open action" width="420"> | <img src="assets/readme/en-us/buttons-action.png" alt="Mos action library" width="420"> |
 
 ## Download & Install
 
@@ -84,20 +89,11 @@ brew update
 brew upgrade --cask mos
 ```
 
-## Development
-
-Mos is built with Swift 5, AppKit, Xcode, and Swift Package Manager. Common commands:
-
-```bash
-xcodebuild -scheme Debug -configuration Debug -destination 'platform=macOS' build
-xcodebuild -scheme Debug -destination 'platform=macOS' test
-```
-
-Changes touching Logi/HID, Accessibility, signing, notarization, app updates, or real-device testing carry higher risk. Please explain the background in an issue or Discussion before opening a large PR in those areas.
-
 ## Contributing
 
 Mos is a small utility that handles system input, Accessibility permission, Logi/HID devices, and persisted user configuration. Maintenance cost and regression risk are real, so we strongly prefer small, focused changes.
+
+Changes touching Logi/HID, Accessibility, signing, notarization, app updates, or real-device testing carry higher risk. Please explain the background in an issue or Discussion before opening a large PR in those areas.
 
 Please explain the motivation, test coverage, and possible behavioral impact in the PR description.
 
