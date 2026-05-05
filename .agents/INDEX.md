@@ -9,8 +9,8 @@
 | 任意代码改动 | `.agents/docs/code-map.md`, `.agents/docs/testing.md`, `.agents/docs/quality-gates.md` | 相关源码、相关 `MosTests/*` |
 | bugfix | `.agents/docs/testing.md`, `.agents/docs/quality-gates.md` | 历史 issue/plan、相关回归测试 |
 | UI / 文案 / 本地化 | `LOCALIZATION.md`, `.agents/docs/quality-gates.md` | `Mos/mul.lproj/Main.xcstrings`, `Mos/Localizable.xcstrings` |
-| Logi / HID / 真实设备 | `.agents/docs/code-map.md`, `.agents/docs/testing.md`, `.agents/docs/quality-gates.md` | `Mos/Logi/*`, `Mos/Integration/*`, `scripts/lint-logi-boundary.sh` |
-| 发布 / appcast / notarization | `.agents/skills/release-preparation/SKILL.md` | `docs/appcast.xml`, `CHANGELOG.md`, `Mos.xcodeproj/project.pbxproj` |
+| Logi / HID / 真实设备 | `.agents/docs/code-map.md`, `.agents/docs/testing.md`, `.agents/docs/quality-gates.md` | `Mos/Logi/*`, `Mos/Integration/*`, `scripts/qa/lint-logi-boundary.sh` |
+| 准备发布 / 更新 appcast / notarization | `.agents/skills/release-preparation/SKILL.md` | `release/appcast.xml`, `CHANGELOG.md`, `Mos.xcodeproj/project.pbxproj` |
 | agent 配置 / skill 调整 | `AGENTS.md`, `.agents/INDEX.md`, `.agents/skills/README.md` | `.claude/skills`, `.codex/skills` 兼容入口 |
 
 ## 当前事实来源

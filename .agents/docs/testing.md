@@ -22,9 +22,9 @@ xcodebuild -scheme Debug -destination 'platform=macOS' test -only-testing:MosTes
 | 新增 / 移动 Swift 文件 | Debug build | 相关测试类 |
 | ScrollCore 热路径 | 相关 ScrollCore / Interpolator / ScrollFilter 测试 | 全量测试，必要时人工滚动验证 |
 | ButtonCore / Shortcut / InputEvent | 相关 ButtonBinding / InputProcessor / ShortcutExecutor 测试 | 偏好设置按钮面板人工验证 |
-| Logi / HID | 相关 `MosTests/Logi*` 测试，`scripts/lint-logi-boundary.sh` | 真实设备测试 |
+| Logi / HID | 相关 `MosTests/Logi*` 测试，`scripts/qa/lint-logi-boundary.sh` | 真实设备测试 |
 | 本地化 / UI 文案 | 检查 `LOCALIZATION.md`，确认 `.xcstrings` 同步 | 长文本、Dark Mode、macOS 10.13 fallback 人工验证 |
-| 发布 / appcast | `release-preparation` skill 内的验证步骤 | GitHub draft 与 appcast URL 对齐 |
+| 准备发布 / appcast 更新 | `release-preparation` skill 内的验证步骤 | GitHub draft 与 appcast URL 对齐 |
 
 ## 真实设备测试
 

@@ -1,11 +1,22 @@
 ---
 name: release-preparation
-description: Use when preparing a new Mos release (stable, beta, or alpha) - covers version bump, xcodebuild archive, Developer ID signing, notarization, zip packaging, changelog generation, Sparkle appcast signing, and GitHub release draft creation. Trigger this skill whenever the user mentions releasing, publishing, shipping a new version, bumping version, updating appcast, or creating a release build of Mos.
+description: Use only when the user has explicit Mos release intent and the task requires a release action: version/build bump, release archive, Developer ID signing, notarization, release zip packaging, changelog generation, Sparkle appcast signing/update, or GitHub release draft creation.
 ---
 
 # Release Preparation
 
 Full release pipeline: bump version → build → sign → notarize → package zip → generate changelog → sign appcast → create GH draft.
+
+## Trigger Rule
+
+Use this skill only when both conditions are true:
+
+- The user has explicit release intent.
+- The task requires at least one release action: version/build bump, release archive, Developer ID signing, notarization, release zip packaging, changelog generation, Sparkle appcast signing/update, or GitHub release draft creation.
+
+If the task does not require a release artifact or appcast update, stay in the normal development workflow and choose validation based on the changed files.
+
+When this skill is not active, high-risk release confirmations are not part of the final report by default. Mention only checks, blockers, and residual risks that are directly relevant to the request.
 
 ## Inputs
 
@@ -113,7 +124,7 @@ The notarized app at `/tmp/MosExport/Mos.app` is used for Step 1.
 ### Step 1: Package Zip
 
 ```bash
-bash .agents/skills/release-preparation/scripts/prepare_zip.sh /tmp/MosExport/Mos.app [--channel beta]
+bash scripts/release/prepare_zip.sh /tmp/MosExport/Mos.app [--channel beta]
 ```
 
 Returns JSON with `zip_path`, `version`, `build`, `tag`, `zip_name`, `length`.
@@ -135,7 +146,7 @@ zipinfo -1 "$ZIP_PATH" | grep '/\._' && echo "ERROR: AppleDouble files found!" |
    gh release list --repo Caldis/Mos --limit 1 --json tagName,isPrerelease
    git rev-parse <tag>  # get exact commit SHA
    ```
-2. Get changes: `git log <last_tag>..HEAD --no-merges --oneline` excluding `website/`, `docs/`, `.issues-archive/`, `AGENTS.md`, `CLAUDE.md`, `LOCALIZATION.md`, `.agents/`, `.claude/`, `.codex/`, `.skills/`, `build/`, `dmg/`, `CRASH_FIX_DESIGN*`.
+2. Get changes: `git log <last_tag>..HEAD --no-merges --oneline` excluding `website/`, `docs/`, `release/`, `.issues-archive/`, `AGENTS.md`, `CLAUDE.md`, `LOCALIZATION.md`, `.agents/`, `.claude/`, `.codex/`, `.skills/`, `build/`, `packaging/`, `CRASH_FIX_DESIGN*`.
 3. Categorize into: 新功能/New Features, 优化/Improvements, 修复/Fixes.
 4. Find contributors: cross-reference `git log --format="%an"` with `gh api repos/.../commits/<sha> --jq '.author.login'`. Inline credit in the relevant section (e.g., "修复鼠标中键映射问题, 感谢 @GonzFC"), NOT in a separate section.
 5. Match tone of `CHANGELOG.md` — bilingual (Chinese first, `---` separator, then English).
@@ -178,7 +189,7 @@ After confirmation, sync any user edits from markdown back to HTML. Always keep 
 ### Step 4: Sign & Update Appcast
 
 ```bash
-bash .agents/skills/release-preparation/scripts/update_appcast.sh <zip_path> /tmp/changelog-{version}.html [--tag TAG]
+bash scripts/release/update_appcast.sh <zip_path> /tmp/changelog-{version}.html [--tag TAG]
 ```
 
 Uses Sparkle `sign_update` from Xcode DerivedData (reads EdDSA key from Keychain). If key missing, guide user:
@@ -189,20 +200,20 @@ find ~/Library/Developer/Xcode/DerivedData -name "generate_keys" -not -path "*/c
 # Export: generate_keys -x <output_file>
 ```
 
-The script writes to both `build/appcast.xml` and `docs/appcast.xml`.
+The script writes to both `build/appcast.xml` and `release/appcast.xml`.
 
 ### Step 5: Commit Appcast
 
-Only `docs/appcast.xml` is tracked by git (`build/` is gitignored):
+Only `release/appcast.xml` is tracked by git (`build/` is gitignored):
 ```bash
-git add docs/appcast.xml
+git add release/appcast.xml
 git commit -m "chore: update appcast for {version}"
 ```
 
 ### Step 6: Create GitHub Draft
 
 ```bash
-bash .agents/skills/release-preparation/scripts/create_gh_draft.sh <tag> <zip_path> ~/Desktop/release-notes-{version}.md [--prerelease]
+bash scripts/release/create_gh_draft.sh <tag> <zip_path> ~/Desktop/release-notes-{version}.md [--prerelease]
 ```
 
 Add `--prerelease` for beta/alpha channels. This creates a **draft** — never publish without user approval.

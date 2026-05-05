@@ -28,7 +28,7 @@
 
 - HID++ packet 构造和 divert/reconcile 决策应保持可单测。
 - 普通应用层不要直接引用 Logi 内部 session、packet、feature 实现。
-- 涉及 `Mos/Logi/` 或 `Mos/Integration/` 边界时运行 `scripts/lint-logi-boundary.sh`。
+- 涉及 `Mos/Logi/` 或 `Mos/Integration/` 边界时运行 `scripts/qa/lint-logi-boundary.sh`。
 - 真实设备逻辑必须由 `LOGI_REAL_DEVICE=1` gate 隔离。
 
 ## UI 与本地化
@@ -40,4 +40,4 @@
 
 ## 发布
 
-发布、Sparkle、签名、notarization、appcast 和 GitHub release draft 必须使用 `.agents/skills/release-preparation/SKILL.md`。每次 release 都必须让 `CURRENT_PROJECT_VERSION` 唯一递增。不要在没有用户确认的情况下发布 release 或推送发布分支；在计划或命令列表中也要把 push/publish 与可自动执行步骤分开。
+准备发布、更新 appcast、生成或签名 release artifact、notarization 和 GitHub release draft 必须使用 `.agents/skills/release-preparation/SKILL.md`。每次 release 都必须让 `CURRENT_PROJECT_VERSION` 唯一递增。不要在没有用户确认的情况下发布 release 或推送发布分支；在计划或命令列表中也要把 push/publish 与可自动执行步骤分开。

@@ -17,6 +17,15 @@
 - `Mos/Windows/`：欢迎、介绍、偏好设置和监视器窗口。
 - `MosTests/`：XCTest 测试；`MosTests/LogiTestDoubles/` 存放 Logi 测试替身。
 
+## 仓库支持目录
+
+- `assets/readme/`：README 展示图片和归档截图。
+- `assets/source/app/`：App 视觉源素材和历史导出，不会直接进入 app bundle；运行时资源应导入 `Mos/Assets.xcassets`。
+- `packaging/dmg/`：DMG 构建脚本、构建输入和历史 DMG 设计素材。
+- `release/`：Sparkle appcast 和公开 release notes 源文件。
+- `scripts/`：可重复执行的项目自动化脚本。
+- `tools/`：手动运行的诊断、探测和回归 harness。
+
 ## 边界约定
 
 ScrollCore 是滚动热路径。不要在高频路径中加入不必要的对象分配、同步 I/O、日志、通知或跨模块调用, 性能是优先事项。
@@ -28,7 +37,7 @@ Logitech 的细节应留在 `Mos/Logi/`。应用其他层通过 `LogiCenter`、`
 `Mos/Integration/` 可以知道更多 Logi bridge 类型，但普通应用层只能使用公开 allowlist。相关改动跑：
 
 ```bash
-scripts/lint-logi-boundary.sh
+scripts/qa/lint-logi-boundary.sh
 ```
 
 ## 持久化和兼容性

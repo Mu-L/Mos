@@ -8,11 +8,10 @@
 
 触发场景：
 
-- 准备 stable、beta 或 alpha release。
-- bump version / build number。
-- 创建 release build、archive、notarization、zip。
-- 更新 Sparkle appcast。
-- 创建 GitHub release draft。
+同时满足两个条件时触发：
+
+- 用户有明确的 Mos release 意图。
+- 任务需要至少一个 release 动作：bump version / build number、创建 release archive、签名、notarization、zip、生成 changelog、签名或更新 Sparkle appcast、创建 GitHub release draft。
 
 约束：
 

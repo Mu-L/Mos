@@ -12,7 +12,7 @@
 - 验证计划包含：
 
 ```bash
-scripts/lint-logi-boundary.sh
+scripts/qa/lint-logi-boundary.sh
 ```
 
 - 若涉及真实设备行为，要求用户确认设备连接后再跑真实设备测试。
