@@ -5,7 +5,7 @@ final class LogiBoundaryEnforcementTests: XCTestCase {
     func testBoundaryLint_passes() throws {
         let process = Process()
         process.launchPath = "/bin/bash"
-        process.arguments = ["scripts/lint-logi-boundary.sh"]
+        process.arguments = ["scripts/qa/lint-logi-boundary.sh"]
         process.currentDirectoryPath = SourceRoot.path
 
         let pipe = Pipe()

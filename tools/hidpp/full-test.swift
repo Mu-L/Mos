@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // HID++ 2.0 全量测试 - 一次运行覆盖: 发现 → 枚举 → Divert → 捕获按键
-// swift tools/hidpp-full-test.swift
+// swift tools/hidpp/full-test.swift
 
 import Foundation
 import IOKit

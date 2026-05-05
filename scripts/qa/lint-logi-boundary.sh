@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lint-logi-boundary.sh
+# scripts/qa/lint-logi-boundary.sh
 #
 # Enforces the Mos/Logi/ module boundary because same-target `internal` is
 # not enough. Two zones, two allowlists:
@@ -18,6 +18,10 @@
 # reference internal Logi symbols (canary, divert planner, etc.).
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+cd "$ROOT_DIR"
 
 ZONE_A_ALLOW=(
     LogiCenter

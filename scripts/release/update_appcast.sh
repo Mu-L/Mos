@@ -5,9 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 BUILD_DIR="$ROOT_DIR/build"
-DOCS_DIR="$ROOT_DIR/docs"
+RELEASE_DIR="$ROOT_DIR/release"
 GITHUB_REPO="Caldis/Mos"
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -99,10 +99,10 @@ EOF
 
 # Merge into existing appcast (prepend new item, dedup by version)
 APPCAST_BUILD="$BUILD_DIR/appcast.xml"
-APPCAST_DOCS="$DOCS_DIR/appcast.xml"
+APPCAST_RELEASE="$RELEASE_DIR/appcast.xml"
 
 BASE_APPCAST=""
-[[ -s "$APPCAST_DOCS" ]] && BASE_APPCAST="$APPCAST_DOCS"
+[[ -s "$APPCAST_RELEASE" ]] && BASE_APPCAST="$APPCAST_RELEASE"
 [[ -z "$BASE_APPCAST" && -s "$APPCAST_BUILD" ]] && BASE_APPCAST="$APPCAST_BUILD"
 
 APPCAST_XML=$(NEW_ITEM="$NEW_ITEM" python3 - "$BASE_APPCAST" "$BUNDLE_VERSION" <<'PY'
@@ -162,13 +162,13 @@ sys.stdout.write(out if out.endswith("\n") else out + "\n")
 PY
 )
 
-mkdir -p "$BUILD_DIR" "$DOCS_DIR"
+mkdir -p "$BUILD_DIR" "$RELEASE_DIR"
 printf '%s' "$APPCAST_XML" > "$APPCAST_BUILD"
-cp "$APPCAST_BUILD" "$APPCAST_DOCS"
+cp "$APPCAST_BUILD" "$APPCAST_RELEASE"
 
 info "Signed:    $ZIP_NAME"
 info "Signature: ${ED_SIGNATURE:0:20}..."
 info "Tag:       $TAG"
 info "URL:       $DOWNLOAD_URL"
 info "Wrote:     $APPCAST_BUILD"
-info "Copied:    $APPCAST_DOCS"
+info "Copied:    $APPCAST_RELEASE"

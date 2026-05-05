@@ -463,7 +463,7 @@ xcodebuild test -scheme Debug -destination 'platform=macOS,arch=arm64' CODE_SIGN
 同时执行:
 
 ```bash
-scripts/lint-logi-boundary.sh
+scripts/qa/lint-logi-boundary.sh
 jq empty Mos/Localizable.xcstrings
 git diff --check
 ```

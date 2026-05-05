@@ -36,7 +36,7 @@
 | `Mos/Logi/Debug/LogiSelfTestWizard.swift` | DEBUG-only AppKit window hosting the wizard UI; Bolt + BLE suites. |
 | `Mos/Integration/LogiIntegrationBridge.swift` | Production `LogiExternalBridge` impl. Imports ScrollCore / ButtonUtils / InputProcessor / Toast. `.shared` singleton. |
 | `Mos/Integration/LogiUsageBootstrap.swift` | One-shot startup `refreshAll()` that pushes Options state into `LogiCenter`. |
-| `scripts/lint-logi-boundary.sh` | Bash lint enforcing zone-A (outside) and zone-B (Integration) symbol allowlists. |
+| `scripts/qa/lint-logi-boundary.sh` | Bash lint enforcing zone-A (outside) and zone-B (Integration) symbol allowlists. |
 | `MosTests/LogiTestDoubles/FakeLogiSessionManager.swift` | Tier 2 test double. |
 | `MosTests/LogiTestDoubles/FakeLogiDeviceSession.swift` | Tier 2 test double with realistic divertedCIDs / divertableCIDs / lastApplied / planner-equivalent applyUsage. |
 | `MosTests/LogiTestDoubles/FakeLogiExternalBridge.swift` | Tier 2 test double recording call sequence + programmable returns. |
@@ -3004,14 +3004,14 @@ ButtonTableCellView migrated from ==.conflict to .isConflict."
 ### Task 5.3: CI lint script + boundary enforcement test
 
 **Files:**
-- Create: `scripts/lint-logi-boundary.sh`
+- Create: `scripts/qa/lint-logi-boundary.sh`
 - Create: `MosTests/LogiBoundaryEnforcementTests.swift`
 
 - [ ] **Step 1: Write lint script**
 
 ```bash
 #!/usr/bin/env bash
-# scripts/lint-logi-boundary.sh
+# scripts/qa/lint-logi-boundary.sh
 # Enforces module boundary because same-target `internal` is not enough.
 set -euo pipefail
 
@@ -3051,13 +3051,13 @@ echo "Lint passed: zone A allowlist enforced."
 ```
 
 ```bash
-chmod +x scripts/lint-logi-boundary.sh
+chmod +x scripts/qa/lint-logi-boundary.sh
 ```
 
 - [ ] **Step 2: Run it manually**
 
 ```bash
-./scripts/lint-logi-boundary.sh
+./scripts/qa/lint-logi-boundary.sh
 ```
 
 Expected: PASS.
@@ -3072,7 +3072,7 @@ final class LogiBoundaryEnforcementTests: XCTestCase {
     func testBoundaryLint_passes() throws {
         let process = Process()
         process.launchPath = "/bin/bash"
-        process.arguments = ["scripts/lint-logi-boundary.sh"]
+        process.arguments = ["scripts/qa/lint-logi-boundary.sh"]
         process.currentDirectoryPath = SourceRoot.path
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -3092,7 +3092,7 @@ private enum SourceRoot {
 
 ```bash
 xcodebuild -scheme Debug -destination 'platform=macOS' test -only-testing:MosTests/LogiBoundaryEnforcementTests
-git add scripts/lint-logi-boundary.sh MosTests/LogiBoundaryEnforcementTests.swift
+git add scripts/qa/lint-logi-boundary.sh MosTests/LogiBoundaryEnforcementTests.swift
 git commit -m "test(logi): CI lint enforces zone allowlists for Logi symbols"
 ```
 
@@ -3220,7 +3220,7 @@ Final review on Step 5. Verify:
 - ConflictDetector 5-state logic correct; precedence foreign > remap > mos > clear.
 - LogiDebugPanel Status column uses LogiConflictDetector.status.
 - ButtonTableCellView uses status.isConflict, not == .conflict.
-- scripts/lint-logi-boundary.sh allowlists match spec §11.
+- scripts/qa/lint-logi-boundary.sh allowlists match spec §11.
 - Self-Test Wizard menu item is DEBUG-only.
 - Boundary lint passes on the current tree.
 
@@ -3237,7 +3237,7 @@ Round 2 closure.
 
 After all 6 steps land:
 
-- [ ] Run `./scripts/lint-logi-boundary.sh` — must pass.
+- [ ] Run `./scripts/qa/lint-logi-boundary.sh` — must pass.
 - [ ] Run `xcodebuild -scheme Debug -destination 'platform=macOS' test` — Tier 1 + Tier 2 all green.
 - [ ] Run `LOGI_REAL_DEVICE=1 xcodebuild -scheme Debug -testPlan DebugWithDevice -destination 'platform=macOS' test` — Tier 3 green with device.
 - [ ] Run Bolt suite of Self-Test Wizard with real Bolt receiver — 14/14 pass.

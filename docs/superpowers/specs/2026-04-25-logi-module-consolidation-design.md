@@ -611,7 +611,7 @@ The Status column rendering in `LogiDebugPanel` is rewired to call this detector
 Same-Xcode-target `internal` does NOT prevent non-facade Logi symbols from being referenced outside `Mos/Logi/`. To enforce the boundary, a CI pre-commit hook / lint rule:
 
 ```bash
-# scripts/lint-logi-boundary.sh
+# scripts/qa/lint-logi-boundary.sh
 #
 # Two zones, two allowlists:
 #
@@ -770,7 +770,7 @@ Risk: medium. Hot path. Tier 2 covers routing sequence; Tier 3 covers real-devic
 - Flat files inside `Mos/Logi/` moved into `Core/` / `Usage/` / `Divert/` / `Bridge/` / `Debug/` per 4.1.
 - New `LogiSelfTestWizard.swift` + `LogiSelfTestRunner.swift` (DEBUG-only, ~500 LOC).
 - Status bar menu item "Logi Self-Test..." (DEBUG build only) added.
-- (F5) `scripts/lint-logi-boundary.sh` added; pre-commit hook + CI run it.
+- (F5) `scripts/qa/lint-logi-boundary.sh` added; pre-commit hook + CI run it.
 - (F5 test) `LogiBoundaryEnforcementTests.swift` greps the source tree and asserts no forbidden Logi symbols outside `Mos/Logi/` + `Mos/Integration/`.
 - `ConflictDetector.status(...)` extended with `mosOwnsDivert:` parameter (F6); `LogiDebugPanel` Status column rewired to call detector; equivalent rule preserved.
 

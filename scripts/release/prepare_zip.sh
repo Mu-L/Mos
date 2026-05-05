@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 BUILD_DIR="$ROOT_DIR/build"
 
 die() { echo "Error: $*" >&2; exit 1; }

@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // HID++ 2.0 BLE 探测工具 v3 - 精确复现 hidapi 行为
-// swift tools/hidpp-probe.swift
+// swift tools/hidpp/probe.swift
 
 import Foundation
 import IOKit

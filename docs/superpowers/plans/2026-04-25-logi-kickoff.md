@@ -98,7 +98,7 @@ End-of-Step Codex review (× 2 rounds at the step boundary, in addition to per-t
 ## Final acceptance (after all 6 steps land)
 
 The plan's "Final acceptance check" section enumerates:
-- `./scripts/lint-logi-boundary.sh` passes.
+- `./scripts/qa/lint-logi-boundary.sh` passes.
 - `Debug.xctestplan` all green.
 - `DebugWithDevice.xctestplan` all green with device.
 - Self-Test Wizard: Bolt suite 14/14 + BLE suite all pass.
